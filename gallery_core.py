@@ -25,12 +25,32 @@ INDEX_REL = os.path.join("data", "pose-index.json")
 
 # 自动探测时依次尝试的候选根目录（相对插件目录的常见排布 + 绝对路径）
 # 自动探测只在**插件目录内部**与**其上一级**找，不向上跳跃横跨其它目录。
-# 刻意去掉了「../../ai-pose-gallery-clone」这类指向特定第三方素材库的硬编码候选 ——
+# 刻意去掉了指向特定第三方素材库的硬编码候选 ——
 # 本仓库是通用工具，不应默认去读某个特定作者的素材。
 AUTO_CANDIDATES = [
     ".",                       # 插件目录本身就是素材库根
     "..",                      # 素材库根是插件目录的上一级（插件放在库目录内的常见情形）
 ]
+
+
+def default_library_dir() -> str:
+    """「一键下载」默认把素材放到哪。
+
+    优先级：环境变量 POSE_GALLERY_LIBRARY > config.json 的 library_dir >
+    用户目录下的 pose-gallery-library。
+    刻意**不放在插件目录内**：避免被 Git 当成改动、也避免插件升级时被覆盖。
+    """
+    env = os.environ.get("POSE_GALLERY_LIBRARY")
+    if env and str(env).strip():
+        return os.path.abspath(os.path.expanduser(str(env).strip()))
+    try:
+        cfg = _read_config()
+        lib = cfg.get("library_dir")
+        if lib and str(lib).strip():
+            return os.path.abspath(os.path.expanduser(str(lib).strip()))
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "pose-gallery-library")
 
 
 class GalleryError(RuntimeError):
@@ -101,11 +121,18 @@ def resolve_gallery_root(explicit: Optional[str] = None) -> str:
         if hit:
             return hit
 
+    # 最后再看「一键下载」的默认目录（用户点过下载就会在这里）
+    hit = check(default_library_dir())
+    if hit:
+        return hit
+
     raise GalleryError(
-        "没找到姿态库数据（data/pose-index.json）。已尝试：\n  "
+        "还没准备好素材库（data/pose-index.json）。已尝试：\n  "
         + "\n  ".join(tried)
-        + "\n请在本插件目录的 config.json 里写 {\"gallery_root\": \"<站点根目录>\"}，"
-          "或设置环境变量 POSE_GALLERY_ROOT。"
+        + "\n\n两个办法：\n"
+          "  1) 在 ComfyUI 里用「姿态库 · 一键下载素材」按钮，自动从原站下载到本机\n"
+          "  2) 手动准备素材后，在 config.json 里写 {\"gallery_root\": \"<素材库根目录>\"}，\n"
+          "     或设置环境变量 POSE_GALLERY_ROOT"
     )
 
 

@@ -16,9 +16,15 @@
 
 import json
 import os
+from typing import Any, Dict
 
 from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-from .gallery_core import GalleryError, GalleryStore, resolve_gallery_root
+from .gallery_core import (
+    GalleryError,
+    GalleryStore,
+    resolve_gallery_root,
+    default_library_dir,
+)
 
 WEB_DIRECTORY = "./web"
 
@@ -53,6 +59,43 @@ def _get_store() -> GalleryStore:
 
 
 # ---------------------------------------------------------------------------
+# 素材存放位置（用于「一键下载」）—— 实现在 gallery_core，这里只做转发
+# ---------------------------------------------------------------------------
+
+def _library_status(path: str) -> Dict[str, Any]:
+    """检查某个素材目录的现状。"""
+    idx = os.path.join(path, "data", "pose-index.json")
+    out: Dict[str, Any] = {
+        "path": path,
+        "index_exists": os.path.isfile(idx),
+        "thumbs": 0,
+        "images": 0,
+        "total_mb": 0.0,
+    }
+    for sub, key in (("thumbs", "thumbs"), ("img", "images")):
+        d = os.path.join(path, sub)
+        if os.path.isdir(d):
+            n = 0
+            size = 0
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        if e.is_file():
+                            n += 1
+                            try:
+                                size += e.stat().st_size
+                            except OSError:
+                                pass
+            except OSError:
+                pass
+            out[key] = n
+            out["total_mb"] += size / 1024 / 1024
+    out["total_mb"] = round(out["total_mb"], 1)
+    out["ready"] = bool(out["index_exists"] and out["images"] > 0)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 注册 HTTP 路由（ComfyUI 不存在时静默跳过，保证可独立导入测试）
 # ---------------------------------------------------------------------------
 
@@ -69,18 +112,110 @@ def _register_routes():
     async def api_config(request):
         try:
             store = _get_store()
+            root, ok = store.root, True
+            meta = store.meta or {}
+            info = {
+                "title": meta.get("title", ""),
+                "total_poses": len(store.poses),
+                "total_images": len(store.by_image_id),
+                "systems": store.systems,
+                "categories": store.categories,
+                "angles": store.angles,
+            }
         except GalleryError as exc:
-            return web.json_response({"ok": False, "error": str(exc)}, status=500)
-        meta = store.meta or {}
+            # 数据还没准备好时，不要在面板上直接报错让用户懵 ——
+            # 告诉前端「需要先下载」即可。
+            root, ok = "", False
+            info = {"error": str(exc)}
+        lib = default_library_dir()
         return web.json_response({
             "ok": True,
-            "root": store.root,
-            "title": meta.get("title", ""),
-            "total_poses": len(store.poses),
-            "total_images": len(store.by_image_id),
-            "systems": store.systems,
-            "categories": store.categories,
-            "angles": store.angles,
+            "ready": ok,
+            "root": root,
+            "library_dir": lib,
+            "library": _library_status(lib),
+            **info,
+        })
+
+    # ---- 一键下载素材 ----
+
+    @routes.get("/pose_gallery/download/status")
+    async def api_dl_status(request):
+        from . import downloader as dlm
+        return web.json_response({
+            "ok": True,
+            "progress": dlm.PROGRESS.snapshot(),
+            "library_dir": default_library_dir(),
+            "library": _library_status(default_library_dir()),
+        })
+
+    @routes.post("/pose_gallery/download/start")
+    async def api_dl_start(request):
+        from . import downloader as dlm
+        if dlm.PROGRESS.snapshot()["running"]:
+            return web.json_response({"ok": False, "error": "已有下载任务在进行中"}, status=409)
+
+        body: Dict[str, Any] = {}
+        try:
+            if request.can_read_body:
+                body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+
+        target = str(body.get("target_dir") or "").strip() or default_library_dir()
+        thumbs = bool(body.get("thumbs", True))
+        fulls = bool(body.get("fulls", True))
+        if not thumbs and not fulls:
+            return web.json_response(
+                {"ok": False, "error": "至少要选一种（缩略图或原图）"}, status=400)
+
+        try:
+            workers = max(1, min(int(body.get("workers", 8)), 16))
+        except (TypeError, ValueError):
+            workers = 8
+
+        # 只下载前 N 个姿态（用于先试一小批，避免一上来就拉几百 MB）
+        limit_poses = None
+        raw_limit = body.get("limit_poses")
+        if raw_limit not in (None, "", 0, "0"):
+            try:
+                limit_poses = max(1, int(raw_limit))
+            except (TypeError, ValueError):
+                limit_poses = None
+
+        started = dlm.start_background(
+            target, thumbs=thumbs, fulls=fulls, workers=workers,
+            limit_poses=limit_poses,
+        )
+        if not started:
+            return web.json_response({"ok": False, "error": "已有下载任务在进行中"}, status=409)
+        return web.json_response({
+            "ok": True, "target_dir": os.path.abspath(target),
+            "limit_poses": limit_poses,
+            "message": "下载已开始，轮询 /pose_gallery/download/status 查看进度",
+        })
+
+    @routes.get("/pose_gallery/download/preview")
+    async def api_dl_preview(request):
+        """下载前先告诉用户要下多少、多大 —— 避免直接闷头拉 700MB。"""
+        from . import downloader as dlm
+        try:
+            idx = dlm.fetch_index()
+        except Exception as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=502)
+        meta = idx["meta"]
+        est = meta["total_images"] * (0.015 + 0.41)  # 缩略图 ~15KB + 原图 ~410KB
+        return web.json_response({
+            "ok": True,
+            "total_poses": meta["total_poses"],
+            "total_images": meta["total_images"],
+            "est_mb_thumbs": round(meta["total_images"] * 0.015, 1),
+            "est_mb_fulls": round(meta["total_images"] * 0.41, 1),
+            "est_mb_total": round(est, 1),
+            "source": meta.get("source_url", ""),
+            "license_note": meta.get("license_note", ""),
         })
 
     @routes.get("/pose_gallery/poses")

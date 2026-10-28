@@ -47,11 +47,42 @@ It only contains **tool code** that reads a local asset library.
 
 2. **本仓库不分发素材。**
    仓库内没有任何 `.png` / `.jpg` 素材文件、没有素材索引数据文件。
-   使用者需自行从原作者处获取素材。
 
    **This repository does not redistribute assets.**
    There are no asset files (`.png` / `.jpg`) and no asset index data files in this repository.
-   Users must obtain the assets themselves from the original author.
+
+   > **关于「一键下载」功能 / About the built-in downloader**
+   >
+   > 插件内置了一个**下载助手**（节点上的「⤓ 下载素材」按钮）。
+   > 它的行为是：**从原作者站点把素材下载到用户自己这台机器的目录**，
+   > 与「用户自己用浏览器去原站下载」在性质上完全相同，只是省了手动步骤。
+   >
+   > 关键点：
+   > - 素材**始终由用户自己的机器向原作者服务器请求**，我们的代码不参与中转
+   > - 仓库、Release、任何分发渠道中**都不包含素材文件**
+   > - 下载得到的素材**只存在于用户本机**，插件不会上传或转发给任何第三方
+   > - 界面上明确提示「素材版权归原作者，请勿再分发」
+   >
+   > 换言之：这**不是**「插件代你分发素材」，而是「插件帮你从原作者那里取到本地」。
+   > 真正下载到的是**用户机器上的副本**，由用户自己承担原作者的条款约束。
+   > 若原作者认为此方式有异议，我们会立即移除该下载功能。
+   >
+   > The plugin ships a **download helper** (the "⤓ Download assets" button).
+   > It fetches assets **from the original author's site to the user's own machine** —
+   > functionally identical to the user downloading them manually in a browser.
+   >
+   > Key points:
+   > - Assets are always requested **from the user's machine to the author's server**;
+   >   our code never relays or proxies them
+   > - **No asset files** are included in the repo, releases, or any distribution channel
+   > - Downloaded assets live **only on the user's machine**; the plugin never uploads
+   >   or forwards them anywhere
+   > - The UI explicitly states "assets belong to the original author; do not redistribute"
+   >
+   > In other words, this is **not** "the plugin redistributing assets for you", but
+   > "the plugin fetching them from the author to your local disk".
+   > The copy lives on the user's own machine, and the user is bound by the author's terms.
+   > If the author disagrees, we will remove the downloader immediately.
 
 3. **本插件是通用工具，不绑定单一素材库。**
    任何符合 [README 数据格式](README.md#数据格式) 的姿态库都能使用，包括使用者自己制作的素材。

@@ -1,6 +1,14 @@
 {
-  "_comment_zh": "把 gallery_root 改成你的姿态库根目录（含 data/、thumbs/、img/ 的那一层）。留空则自动探测插件目录 ./、../、../ai-pose-gallery-clone、../../ai-pose-gallery-clone，或读环境变量 POSE_GALLERY_ROOT。",
-  "_comment_en": "Set gallery_root to your pose library root (the folder containing data/, thumbs/, img/). Leave empty to auto-detect ./ .. ../ai-pose-gallery-clone ../../ai-pose-gallery-clone under the plugin dir, or set the POSE_GALLERY_ROOT env var.",
-  "_note": "This repo ships NO asset data. You must provide the library yourself and follow its license.",
-  "gallery_root": ""
+  "_comment_zh": "一般不用改。素材可用节点上的「⤓ 下载素材」按钮自动下载到 library_dir。若你已有素材库，把 gallery_root 指过去（含 data/、thumbs/、img/ 的那一层）。",
+  "_comment_en": "Usually nothing to change. Use the '⤓ Download assets' button on any node to fetch assets into library_dir. If you already have a library, point gallery_root at it (the folder containing data/, thumbs/, img/).",
+
+  "gallery_root": "",
+  "library_dir": "",
+
+  "_field_notes": {
+    "gallery_root": "留空自动探测：插件目录 ./、../、以及 library_dir。也可设环境变量 POSE_GALLERY_ROOT。",
+    "library_dir": "一键下载的目标目录。留空 = 用户目录下的 pose-gallery-library。也可设环境变量 POSE_GALLERY_LIBRARY。"
+  },
+
+  "_note": "This repo ships NO asset data. The downloader fetches assets from the original author's site to YOUR machine; it does not redistribute them. See ATTRIBUTION.md."
 }
