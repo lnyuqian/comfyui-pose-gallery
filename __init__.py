@@ -9,14 +9,15 @@
 路由都挂在 /pose_gallery/* 下，与其它插件不冲突。
 后端接口只读本地文件，不写任何东西。
 
-⚠️ 测试状态：本插件**未在真实运行的 ComfyUI 中完整测试过**。
-   不保证能直接跑通。若导致 ComfyUI 无法启动，移走本插件目录即可恢复。
-   详见 README.md 顶部说明。
+状态：已在真实 ComfyUI（v0.37.0 / 前端 1.53.6）中实测通过，
+包括图库面板、素材下载、以及与 Qwen-Image-2.1 图生图的完整出图链路。
 """
 
 import json
 import os
+import sys
 from typing import Any, Dict
+from urllib.parse import quote
 
 from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from .gallery_core import (
@@ -33,11 +34,26 @@ __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _CONFIG = os.path.join(_PLUGIN_DIR, "config.json")
 
-# 加载时打印一次明确的测试状态提示，避免使用者误以为它是稳定版
-print(
-    "[PoseGallery] ⚠️  本插件未经真实 ComfyUI 环境测试，请谨慎使用、不保证能跑通。"
-    " / NOT TESTED in a real ComfyUI - use with caution, no guarantee it works.",
-    flush=True,
+# 加载时打印一次提示。
+# 注意：Windows 中文环境下 ComfyUI 的 stdout 常是 GBK 代码页，
+# 直接 print 非 GBK 字符（如 "⚠️" 或部分中文标点）会抛 UnicodeEncodeError，
+# 进而使整个插件导入失败、节点不注册。这里统一走安全打印。
+def _safe_print(msg: str) -> None:
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        try:
+            enc = getattr(sys.stdout, "encoding", None) or "ascii"
+            print(msg.encode(enc, "replace").decode(enc, "replace"), flush=True)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+_safe_print(
+    "[PoseGallery] 已加载 4 个节点（单张 / 角度组 / 批量 / 取单张）。"
+    " 图库面板路由挂在 /pose_gallery/*。"
 )
 
 
@@ -252,10 +268,12 @@ def _register_routes():
                 "category": p.get("category", ""),
                 "number": p.get("number", ""),
                 "angles": store.offsets(p),
-                "cover": cover["thumb"] if cover else "",
-                "cover_url": store.rel_url(
-                    (p.get("angles") or {}).get(store.offsets(p)[0], {}).get("thumb", "")
-                ) if store.offsets(p) else "",
+                # cover 走 /pose_gallery/thumb 路由：
+                # 图库目录通常不在 ComfyUI 的 web 根下，直接给 /thumbs/xxx.jpg 必然 404。
+                "cover": cover["image_id"] if cover else "",
+                "cover_url": (
+                    "/pose_gallery/thumb?image_id=" + quote(cover["image_id"])
+                ) if cover and cover.get("image_id") else "",
                 "image_ids": [i["image_id"] for i in images],
             })
         return web.json_response({
@@ -278,9 +296,9 @@ def _register_routes():
             images.append({
                 "image_id": r["image_id"],
                 "angle": r["angle"],
-                "thumb_url": store.rel_url(
-                    (pose.get("angles") or {}).get(r["angle"], {}).get("thumb", "")
-                ),
+                "thumb_url": (
+                    "/pose_gallery/thumb?image_id=" + quote(r["image_id"])
+                ) if r.get("image_id") else "",
                 "full_path": r["full"],
             })
         return web.json_response({

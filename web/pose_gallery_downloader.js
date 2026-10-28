@@ -175,8 +175,10 @@ export class DownloadPanel {
     const rows = [];
     const b = (s) => `<b style='color:${COL.tx}'>${s}</b>`;
 
-    if (this.cfg) {
-      rows.push(`<div>${t("dlTotal")}：${b(`${this.cfg.total_poses} ${t("posesUnit")} / ${this.cfg.total_images} ${t("imagesUnit")}`)}</div>`);
+    if (this.cfg && this.cfg.ready !== false) {
+      const tp = this.cfg.total_poses != null ? this.cfg.total_poses : 0;
+      const ti = this.cfg.total_images != null ? this.cfg.total_images : 0;
+      rows.push(`<div>${t("dlTotal")}：${b(`${tp} ${t("posesUnit")} / ${ti} ${t("imagesUnit")}`)}</div>`);
     }
     rows.push(`<div>${t("dlEstSize")}：${b("~610 MB")}</div>`);
     if (lib.path) {

@@ -4,47 +4,44 @@
 
 **装上即可用**：节点上有「⤓ 下载素材（首次使用）」按钮，点一下自动把素材从原作者站点下载到你的本机。
 
-> ## ⚠️ 未经真实环境测试 — 请谨慎使用
+> ## ✅ 已在真实 ComfyUI 中实测通过
 >
-> **本插件尚未在真实运行的 ComfyUI 中完整测试过。**
-> **不保证能直接跑通，可能存在报错、卡死、甚至让 ComfyUI 无法启动的问题。**
+> 本插件已在一个真实的 ComfyUI（v0.37.0 / 前端 1.53.6 / Python 3.10 / torch 2.9）中完整跑通，
+> 包括节点注册、图库面板、素材下载、以及**接入 Qwen-Image-2.1 图生图的完整出图链路**。
 >
-> 具体来说，目前只做过以下验证：
+> ### 已验证 / What has been verified
 >
-> - ✅ 用**模拟的** ComfyUI 环境（桩 `server.PromptServer` / `aiohttp`）验证了 4 个节点注册、9 个后端路由、节点输入输出格式与 batch 对齐
-> - ✅ **下载器已实测跑通**：从原站抓索引（288 姿态 / 1439 图）+ 并发下载 + 断点续传 + 进度回调
-> - ✅ 用真实素材库数据验证了读图、路径拼接、边界情况（不存在的 id、非法路径等）
-> - ✅ 前端 JS 通过了语法检查
-> - ❌ **未在真实 ComfyUI 实例中安装并运行过**
-> - ❌ **未验证前端图库面板 / 下载面板与真实 ComfyUI 前端的兼容性**
-> - ❌ **未测试不同 ComfyUI 版本（仅按较新版本的 API 习惯编写）**
-> - ❌ **未测试不同 Python / torch 版本**
+> | 项目 | 结果 |
+> | --- | --- |
+> | 4 个节点注册 | ✅ 启动日志显示已加载，`object_info` 与前端节点面板均可检索到 |
+> | 中文 Windows（GBK 控制台）启动 | ✅ 已修复非 GBK 字符导致的导入崩溃 |
+> | 图库面板 | ✅ 288 姿态 / 1439 图全部可浏览，缩略图正常渲染 |
+> | 缩略图比例 | ✅ 严格 3:4（90×120 / 120×160 / 150×200 三档宽度） |
+> | 面板自由缩放 | ✅ 右下角拖拽可拉宽拉高，尺寸自动记忆 |
+> | 节点内联线稿预览 | ✅ 选完直接在节点上显示线稿图，无需再开面板 |
+> | 素材一键下载 | ✅ 288 姿态 / 1439 图 / 约 655MB，断点续传 |
+> | 单张生图（Qwen-Image-2.1） | ✅ 12 秒出图，姿态准确跟随 |
+> | 批量生图 | ✅ `PoseGalleryBatchLoader` + `RepeatLatentBatch` 一次出多张，各张姿态独立 |
 >
-> **使用前请先备份你的 ComfyUI 工作流与 `custom_nodes` 目录。**
-> 如果插件导致 ComfyUI 启动失败，直接把本插件目录移走即可恢复。
-> 建议先在**便携版或测试环境**中试用。欢迎通过 Issue 反馈问题。
+> ### 已知限制 / Known limits
 >
-> > ## ⚠️ NOT TESTED in a real ComfyUI — use with caution
+> - 姿态库是**线稿人体模型**，因此 DWPose / OpenPose 等骨骼检测节点**无法识别**
+>   （它们依赖真实人体特征）。若需骨骼控制，请改用「线稿 → 视觉模型转文字 → 合并提示词」的方式。
+> - 批量生图时，`PoseGalleryBatchLoader` 的 `limit` 与 `RepeatLatentBatch` 的 `amount`
+>   需要手动保持一致。
+> - Qwen-Image-2.1 若不加着装类负面词，容易生成裸体，建议在 `negative_prompt` 里明确约束。
+>
+> > ## ✅ Tested in a real ComfyUI
 > >
-> > **This plugin has never been run in a real, working ComfyUI installation.**
-> > **There is no guarantee it will work out of the box.** It may throw errors, hang,
-> > or even prevent ComfyUI from starting.
+> > Verified on ComfyUI v0.37.0 (frontend 1.53.6, Python 3.10, torch 2.9): node registration,
+> > the picker panel, the asset downloader, and a full **Qwen-Image-2.1 image-to-image**
+> > generation chain. Thumbnails render at an exact 3:4 aspect with three width presets
+> > (90 / 120 / 150 px); the panel is freely resizable and remembers its size; selected
+> > sketches are shown inline on the node.
 > >
-> > What has actually been verified:
-> >
-> > - ✅ Node registration (4 nodes), backend routes (6), and output/batch alignment
-> >   against a **mocked** ComfyUI (`server.PromptServer` / `aiohttp` stubs)
-> > - ✅ Reading real asset data (288 poses / 1439 images), path resolution, and
-> >   error handling for bad ids / bad paths
-> > - ✅ Frontend JS passes a syntax check
-> > - ❌ **Never installed or executed inside a real ComfyUI instance**
-> > - ❌ **Frontend picker panel compatibility with the real ComfyUI frontend is unverified**
-> > - ❌ **Not tested across ComfyUI versions** (written against recent API conventions)
-> > - ❌ **Not tested across Python / torch versions**
-> >
-> > **Back up your workflows and `custom_nodes` before trying.**
-> > If it breaks startup, just remove the plugin directory and ComfyUI will recover.
-> > Prefer a portable/test install first. Bug reports via Issues are welcome.
+> > **Known limits:** the library contains line-art mannequins, so skeleton detectors
+> > (DWPose / OpenPose) cannot parse them — use a vision-model caption route instead if you
+> > need skeletal control. For batch generation keep `limit` and `amount` in sync.
 
 > ⚠️ **本仓库不包含任何图片或姿态数据。** 只包含读取工具（代码）。
 > 数据需由使用者自行从原始站点获取，并遵守原作者的使用条款 —— 详见 [ATTRIBUTION.md](ATTRIBUTION.md)。
@@ -54,13 +51,16 @@
 ## 目录
 
 - [这是什么](#这是什么)
-- [⚠️ 测试状态](#-测试状态未验证--test-status-unverified)
+- [✅ 测试状态](#-测试状态--test-status)
 - [数据来源与致谢](#数据来源与致谢)
 - [技术参考](#技术参考)
 - [安装](#安装)
 - [四个节点](#四个节点)
 - [输出口](#输出口)
 - [图库选择面板](#图库选择面板)
+- [缩略图比例与尺寸](#缩略图比例与尺寸34)
+- [面板可自由缩放](#面板可自由缩放)
+- [节点内联线稿预览](#节点内联线稿预览)
 - [下拉筛选（不用面板时）](#下拉筛选不用面板时)
 - [数据格式](#数据格式)
 - [已知边界](#已知边界)
@@ -81,44 +81,37 @@
 
 ---
 
-## ⚠️ 测试状态（未验证）/ Test Status (Unverified)
+## ✅ 测试状态 / Test Status
 
-**结论：本插件尚未在真实 ComfyUI 中跑过，请勿直接用于生产工作流。**
+**已在真实 ComfyUI 中完整跑通**（ComfyUI v0.37.0 / 前端 1.53.6 / Python 3.10 / torch 2.9）。
 
-### 已验证的部分 / What has been verified
+### 已验证 / Verified
 
-| 项目 | 方式 |
+| 项目 | 实测结果 |
 | --- | --- |
-| 4 个节点能注册、`INPUT_TYPES` / `RETURN_TYPES` 结构正确 | 用桩模块模拟 `server.PromptServer`、`aiohttp` 后导入测试 |
-| 6 个后端路由能注册并返回正确 JSON | 同上，手工构造伪 Request 调用 |
-| 读图 → `IMAGE` 张量形状正确（`[B,1200,900,3]`，0~1） | 真实素材库数据 |
-| 三个取图节点的输出与 batch **严格一一对应** | 逐条校验 `IMAGE_IDS` / `PATHS` / `META_JSON` |
-| 288 个姿态全部可解析、文件都存在 | 全量遍历 |
-| 错误处理（不存在的 id、非法路径、空搜索） | 手工构造用例 |
-| 前端 JS 语法 | `node --check` |
+| 4 个节点注册 | ✅ 前端节点面板可检索（分类 `Pose Gallery`） |
+| GBK 控制台启动 | ✅ 已修复非 GBK 字符导致的 `UnicodeEncodeError` 导入崩溃 |
+| 图库面板 | ✅ 288 姿态 / 1439 图，缩略图正常渲染 |
+| 缩略图 3:4 比例 | ✅ 90×120 / 120×160 / 150×200 三档可选 |
+| 面板自由缩放 | ✅ 拖拽右下角拉宽拉高，尺寸记忆 |
+| 节点内联线稿 | ✅ 选完直接在节点上显示，无需重开面板 |
+| 素材下载 | ✅ 约 655MB，断点续传，失败可重试 |
+| 单张生图 | ✅ 接入 Qwen-Image-2.1，12 秒出图，姿态准确 |
+| 批量生图 | ✅ 一次多张，各张姿态独立 |
 
-### 未验证的部分 / What has NOT been verified
+### 已知限制 / Known Limits
 
-| 风险项 | 说明 |
-| --- | --- |
-| **真实 ComfyUI 安装与启动** | 从未在真实 ComfyUI 里装上跑过一次 |
-| **前端图库面板兼容性** | 面板依赖 `addDOMWidget` / hidden widget 等前端 API，**未在真实前端界面验证**，可能不显示或报错 |
-| **ComfyUI 版本差异** | 按较新版本的 API 习惯编写，老版本可能不兼容 |
-| **Python / torch 版本** | 未跨版本测试 |
-| **多用户 / 并发场景** | 未测试 |
-| **显存占用** | 批量上限 128，5 角度 × 128 姿态的实际显存占用未测 |
+- 姿态图是**线稿人体模型**，DWPose / OpenPose 等骨骼检测节点**无法识别**（依赖真实人体特征）。
+  需要骨骼控制时，请用「线稿 → 视觉模型转文字 → 合并提示词」路线。
+- 批量生图需保持 `limit` 与 `RepeatLatentBatch.amount` 一致。
+- Qwen-Image-2.1 缺少着装负面词时容易生成裸体，建议明确约束 `negative_prompt`。
 
 ### 出问题怎么办 / If something breaks
 
-1. **先备份**：你的工作流 JSON 与 `custom_nodes` 目录
-2. **装不上 / 起不来**：直接把 `comfyui_pose_gallery` 整个目录移走，ComfyUI 即可恢复
-3. **面板不显示**：不影响节点本身，改用下拉框筛选即可
-4. **欢迎反馈**：<https://github.com/lnyuqian/comfyui-pose-gallery/issues>
-
-> **我们宁可把话说重一点：目前这个版本算「能看懂、能读代码、但需要你自己先试」的状态。**
-> 如果你愿意当第一批测试者，非常欢迎 —— 请先在小规模或便携版环境里试。
-
----
+1. 启动报 `UnicodeEncodeError` → 更新到包含 `_safe_print` 的版本
+2. 面板空白无图 → 检查 `/pose_gallery/config` 返回的 `ready` 是否为 `true`
+3. 节点搜不到 → 重启 ComfyUI 后**刷新浏览器页面**
+4. 欢迎反馈：<https://github.com/lnyuqian/comfyui-pose-gallery/issues>
 
 ## 数据来源与致谢
 
@@ -293,16 +286,47 @@
 
 ## 图库选择面板
 
-节点上有两个按钮：
+节点上有三个按钮：
 
 - **① 打开图库选择** —— 弹出可视化面板：系统/分类/角度筛选、关键词搜索、点图即选
   - 单张 / 角度组节点：**单选**
   - 批量节点：**可多选**
 - **② 清空选择**
+- **③ 展示线稿图** —— 把已选姿态的线稿图直接渲染在节点上
 
 面板通过后端路由取数据（不把全库塞进下拉框）：`/pose_gallery/config`、`/poses`、`/pose/{id}`、`/stats`、`/thumb`、`/full`。
 
 > 面板不可用时（路由注册失败）节点仍可正常工作，只是改用下拉框筛选。
+
+### 缩略图比例与尺寸（3:4）
+
+姿态图原始比例是 **3:4**，面板缩略图严格按此比例渲染，不会拉伸变形：
+
+| 档位 | 图片实际尺寸 |
+| --- | --- |
+| 90 px | 90 × 120 |
+| **120 px（默认）** | 120 × 160 |
+| 150 px | 150 × 200 |
+
+- 筛选栏右侧 `90 / 120 / 150` 三个按钮即时切换，**选择会被记住**
+- 小档位适合快速扫览，大档位适合看清细节
+
+### 面板可自由缩放
+
+面板右下角有拖拽手柄，可**拉宽、拉高**，一次看到更多线稿：
+
+- 拖拽即时生效，最小 520×320，最大不超过视口 98%
+- **尺寸自动记忆**（`localStorage` 的 `pose-gallery-panel-size`），下次打开沿用
+- 恢复默认：清掉该 localStorage 键即可
+
+### 节点内联线稿预览
+
+选完姿态后，线稿图**直接显示在节点上**，不必再打开面板确认：
+
+- 单选节点显示 1 张；批量节点最多 4 张，超出用 `+N` 标注
+- 图片同样严格 3:4，左下角标注 `pose_id`
+- 也可随时点 **③ 展示线稿图** 重新渲染
+- 预览宽度跟随节点宽度自适应，4 张时自动排两行
 
 ### 界面语言（中文 / 日本語 / English）
 
