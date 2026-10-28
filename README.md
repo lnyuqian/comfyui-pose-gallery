@@ -2,6 +2,47 @@
 
 把**本地姿态素材库**接进 ComfyUI：按「单张 / 一组 5 角度 / 批量（跨分类）」取图，输出图片与编号元信息，供其它节点读取。
 
+> ## ⚠️ 未经真实环境测试 — 请谨慎使用
+>
+> **本插件尚未在真实运行的 ComfyUI 中完整测试过。**
+> **不保证能直接跑通，可能存在报错、卡死、甚至让 ComfyUI 无法启动的问题。**
+>
+> 具体来说，目前只做过以下验证：
+>
+> - ✅ 用**模拟的** ComfyUI 环境（桩 `server.PromptServer` / `aiohttp`）验证了 4 个节点注册、6 个后端路由、节点输入输出格式与 batch 对齐
+> - ✅ 用真实素材库数据（288 姿态 / 1439 图）验证了读图、路径拼接、边界情况（不存在的 id、非法路径等）
+> - ✅ 前端 JS 通过了语法检查
+> - ❌ **未在真实 ComfyUI 实例中安装并运行过**
+> - ❌ **未验证前端图库面板与真实 ComfyUI 前端的兼容性**
+> - ❌ **未测试不同 ComfyUI 版本（仅按较新版本的 API 习惯编写）**
+> - ❌ **未测试不同 Python / torch 版本**
+>
+> **使用前请先备份你的 ComfyUI 工作流与 `custom_nodes` 目录。**
+> 如果插件导致 ComfyUI 启动失败，直接把本插件目录移走即可恢复。
+> 建议先在**便携版或测试环境**中试用。欢迎通过 Issue 反馈问题。
+>
+> > ## ⚠️ NOT TESTED in a real ComfyUI — use with caution
+> >
+> > **This plugin has never been run in a real, working ComfyUI installation.**
+> > **There is no guarantee it will work out of the box.** It may throw errors, hang,
+> > or even prevent ComfyUI from starting.
+> >
+> > What has actually been verified:
+> >
+> > - ✅ Node registration (4 nodes), backend routes (6), and output/batch alignment
+> >   against a **mocked** ComfyUI (`server.PromptServer` / `aiohttp` stubs)
+> > - ✅ Reading real asset data (288 poses / 1439 images), path resolution, and
+> >   error handling for bad ids / bad paths
+> > - ✅ Frontend JS passes a syntax check
+> > - ❌ **Never installed or executed inside a real ComfyUI instance**
+> > - ❌ **Frontend picker panel compatibility with the real ComfyUI frontend is unverified**
+> > - ❌ **Not tested across ComfyUI versions** (written against recent API conventions)
+> > - ❌ **Not tested across Python / torch versions**
+> >
+> > **Back up your workflows and `custom_nodes` before trying.**
+> > If it breaks startup, just remove the plugin directory and ComfyUI will recover.
+> > Prefer a portable/test install first. Bug reports via Issues are welcome.
+
 > ⚠️ **本仓库不包含任何图片或姿态数据。** 只包含读取工具（代码）。
 > 数据需由使用者自行从原始站点获取，并遵守原作者的使用条款 —— 详见 [ATTRIBUTION.md](ATTRIBUTION.md)。
 
@@ -10,6 +51,7 @@
 ## 目录
 
 - [这是什么](#这是什么)
+- [⚠️ 测试状态](#-测试状态未验证--test-status-unverified)
 - [数据来源与致谢](#数据来源与致谢)
 - [技术参考](#技术参考)
 - [安装](#安装)
@@ -33,6 +75,45 @@
 - 把选中的图片读成 `IMAGE` 张量，同时把编号 / 名称 / 路径等元信息一起输出
 
 零第三方依赖，只用 Python 标准库 + ComfyUI 自带的 `torch` / `PIL` / `numpy`。
+
+---
+
+## ⚠️ 测试状态（未验证）/ Test Status (Unverified)
+
+**结论：本插件尚未在真实 ComfyUI 中跑过，请勿直接用于生产工作流。**
+
+### 已验证的部分 / What has been verified
+
+| 项目 | 方式 |
+| --- | --- |
+| 4 个节点能注册、`INPUT_TYPES` / `RETURN_TYPES` 结构正确 | 用桩模块模拟 `server.PromptServer`、`aiohttp` 后导入测试 |
+| 6 个后端路由能注册并返回正确 JSON | 同上，手工构造伪 Request 调用 |
+| 读图 → `IMAGE` 张量形状正确（`[B,1200,900,3]`，0~1） | 真实素材库数据 |
+| 三个取图节点的输出与 batch **严格一一对应** | 逐条校验 `IMAGE_IDS` / `PATHS` / `META_JSON` |
+| 288 个姿态全部可解析、文件都存在 | 全量遍历 |
+| 错误处理（不存在的 id、非法路径、空搜索） | 手工构造用例 |
+| 前端 JS 语法 | `node --check` |
+
+### 未验证的部分 / What has NOT been verified
+
+| 风险项 | 说明 |
+| --- | --- |
+| **真实 ComfyUI 安装与启动** | 从未在真实 ComfyUI 里装上跑过一次 |
+| **前端图库面板兼容性** | 面板依赖 `addDOMWidget` / hidden widget 等前端 API，**未在真实前端界面验证**，可能不显示或报错 |
+| **ComfyUI 版本差异** | 按较新版本的 API 习惯编写，老版本可能不兼容 |
+| **Python / torch 版本** | 未跨版本测试 |
+| **多用户 / 并发场景** | 未测试 |
+| **显存占用** | 批量上限 128，5 角度 × 128 姿态的实际显存占用未测 |
+
+### 出问题怎么办 / If something breaks
+
+1. **先备份**：你的工作流 JSON 与 `custom_nodes` 目录
+2. **装不上 / 起不来**：直接把 `comfyui_pose_gallery` 整个目录移走，ComfyUI 即可恢复
+3. **面板不显示**：不影响节点本身，改用下拉框筛选即可
+4. **欢迎反馈**：<https://github.com/lnyuqian/comfyui-pose-gallery/issues>
+
+> **我们宁可把话说重一点：目前这个版本算「能看懂、能读代码、但需要你自己先试」的状态。**
+> 如果你愿意当第一批测试者，非常欢迎 —— 请先在小规模或便携版环境里试。
 
 ---
 
@@ -261,6 +342,8 @@
   若下游要求严格同尺寸，建议按 `angle` 固定筛选（同角度尺寸一致）。
 - **批次别开太大**：`limit` 上限 128；5 角度 × 128 姿态会占较多显存。
 - **Windows 路径**：`config.json` 里既可用正斜杠 `/`，也可用双反斜杠 `\\`。
+- **⚠️ 未经真实环境测试**：见 [测试状态](#-测试状态未验证--test-status-unverified)，
+  出现任何异常请先备份工作流、再把插件目录移走。
 
 ---
 

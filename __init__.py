@@ -8,6 +8,10 @@
 
 路由都挂在 /pose_gallery/* 下，与其它插件不冲突。
 后端接口只读本地文件，不写任何东西。
+
+⚠️ 测试状态：本插件**未在真实运行的 ComfyUI 中完整测试过**。
+   不保证能直接跑通。若导致 ComfyUI 无法启动，移走本插件目录即可恢复。
+   详见 README.md 顶部说明。
 """
 
 import json
@@ -22,6 +26,13 @@ __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _CONFIG = os.path.join(_PLUGIN_DIR, "config.json")
+
+# 加载时打印一次明确的测试状态提示，避免使用者误以为它是稳定版
+print(
+    "[PoseGallery] ⚠️  本插件未经真实 ComfyUI 环境测试，请谨慎使用、不保证能跑通。"
+    " / NOT TESTED in a real ComfyUI - use with caution, no guarantee it works.",
+    flush=True,
+)
 
 
 def _configured_root() -> str:

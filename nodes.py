@@ -170,7 +170,7 @@ class PoseGalleryLoader:
     RETURN_NAMES = ("IMAGE", "META_JSON", "IMAGE_IDS", "PATHS", "NOTE")
     FUNCTION = "load"
     CATEGORY = "Pose Gallery"
-    DESCRIPTION = "从姿态素材库取 1 张图（可先按系统/分类/角度筛选），输出图片与编号元信息。"
+    DESCRIPTION = "从姿态素材库取 1 张图（可先按系统/分类/角度筛选），输出图片与编号元信息。（⚠️ 未在真实 ComfyUI 测试，可能不稳定）"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -272,7 +272,7 @@ class PoseGalleryAngleSet:
     RETURN_NAMES = ("IMAGE", "META_JSON", "IMAGE_IDS", "PATHS", "NOTE")
     FUNCTION = "load"
     CATEGORY = "Pose Gallery"
-    DESCRIPTION = "取同一姿态的多个角度（默认 5 张）作为批次，便于多视角参考。"
+    DESCRIPTION = "取同一姿态的多个角度（默认 5 张）作为批次，便于多视角参考。（⚠️ 未在真实 ComfyUI 测试，可能不稳定）"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -383,7 +383,7 @@ class PoseGalleryBatchLoader:
     RETURN_NAMES = ("IMAGE", "META_JSON", "IMAGE_IDS", "PATHS", "NOTE")
     FUNCTION = "load"
     CATEGORY = "Pose Gallery"
-    DESCRIPTION = "批量取图（可跨分类 / 多姿态），输出批次与严格对齐的元信息列表。"
+    DESCRIPTION = "批量取图（可跨分类 / 多姿态），输出批次与严格对齐的元信息列表。（⚠️ 未在真实 ComfyUI 测试，可能不稳定）"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -484,7 +484,7 @@ class PoseGalleryPickOne:
     RETURN_NAMES = ("IMAGE", "META_JSON", "IMAGE_ID", "PATH")
     FUNCTION = "pick"
     CATEGORY = "Pose Gallery"
-    DESCRIPTION = "从批次中按序号取单张，并同步取出对应的元信息 / 编号 / 路径。"
+    DESCRIPTION = "从批次中按序号取单张，并同步取出对应的元信息 / 编号 / 路径。（⚠️ 未在真实 ComfyUI 测试，可能不稳定）"
 
     def pick(self, image, index=0, meta_json="", image_ids="", paths=""):
         try:
