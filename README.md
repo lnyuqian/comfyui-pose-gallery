@@ -126,8 +126,13 @@ TextEncodeQwenImage21            (线稿作为参考图)
 KSampler → VAEDecode → SaveImage
 ```
 
-**批量要点**：`PoseGalleryBatchLoader` 的 `limit` 与 `RepeatLatentBatch` 的 `amount`
-需要手动保持一致，否则只出一张。
+**批量要点**：批量工作流采用「**每个姿态独立编码 + 独立采样**」的结构 —— 每个
+`pose_id` 各占一组 `PoseGalleryLoader → TextEncodeQwenImage21 → KSampler`，
+最后用 `ImageBatch` 合并成一个批次输出。
+
+> ⚠️ **不要**用「一个 `TextEncodeQwenImage21` + `RepeatLatentBatch`」的做法。
+> 该节点内部对每张参考图只取第一帧（`image[:1]`），且只输出**一份** latent；
+> 复制 latent 只会得到同一姿态的细微变体，后面的线稿等于没起作用。
 
 > 这两个工作流依赖 Qwen-Image-2.1 相关模型，需自行准备。姿态素材可换成任意来源。
 
@@ -217,8 +222,14 @@ TextEncodeQwenImage21            (sketch as reference image)
 KSampler → VAEDecode → SaveImage
 ```
 
-**Batch note**: keep `PoseGalleryBatchLoader.limit` and `RepeatLatentBatch.amount`
-in sync, otherwise you only get a single image.
+**Batch note**: the batch workflow uses **one encode + one sampler per pose** — each
+`pose_id` gets its own `PoseGalleryLoader → TextEncodeQwenImage21 → KSampler`, and the
+results are merged with `ImageBatch`.
+
+> ⚠️ Do **not** use a single `TextEncodeQwenImage21` combined with `RepeatLatentBatch`.
+> That encoder takes only the first frame of each reference image (`image[:1]`) and
+> emits a **single** latent, so duplicating the latent only produces minor variants of
+> one pose — the later sketches have no effect.
 
 > Both workflows expect the Qwen-Image-2.1 model set, which you must provide.
 > The pose assets can be swapped for any other source.
