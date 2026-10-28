@@ -1,0 +1,37 @@
+MIT License
+
+Copyright (c) 2026 lnyuqian
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Note on assets / 关于素材
+
+This MIT license applies ONLY to the source code in this repository.
+
+It does NOT apply to any pose asset data (images, thumbnails, index files)
+originating from "ポーズ集 POSE-DB-01" by ギア (https://x.com/giaaibusi).
+Those assets are NOT included in this repository and remain the sole property
+of their original author. See ATTRIBUTION.md for details.
+
+本 MIT 许可**仅适用于本仓库的源代码**。
+
+不适用于来自 ギア 的「ポーズ集 POSE-DB-01」的任何素材数据（图片、缩略图、索引文件）。
+该等素材**不包含在本仓库中**，其著作权归原作者所有。详见 ATTRIBUTION.md。

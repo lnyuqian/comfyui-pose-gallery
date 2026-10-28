@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ComfyUI / 运行期
+comfyui_pose_gallery.egg-info/
+node_modules/
+
+# 用户本地配置（各自机器路径不同，不应提交）
+config.local.json
+
+# ==== 素材数据：绝对不要提交 ====
+# 本仓库只发布代码，不发布任何来自原作者的素材
+img/
+thumbs/
+data/
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# ==== 但 UI 截图例外（API 截图不属于素材再分发）====
+!docs/screenshots/*.png
+!docs/screenshots/*.jpg
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~

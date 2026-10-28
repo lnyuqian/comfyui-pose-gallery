@@ -1,0 +1,13 @@
+[project]
+name = "comfyui-pose-gallery"
+version = "1.0.0"
+description = "ComfyUI custom nodes: browse a local pose-reference library and load single poses, 5-angle sets, or batches — with image IDs and metadata exposed to downstream nodes. Ships no asset data."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[tool.comfy]
+PublisherId = "lnyuqian"
+DisplayName = "Pose Gallery"
+Icon = ""
