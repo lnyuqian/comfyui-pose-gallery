@@ -326,7 +326,7 @@ export class DownloadPanel {
   }
 }
 
-/* 在任何姿态库节点上加一个「下载素材」按钮 */
+/* 在任何姿态库节点上加一个「下载素材」按钮（放在最后一行，并显示下载状态） */
 app.registerExtension({
   name: "PoseGallery.Downloader",
   async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -338,24 +338,85 @@ app.registerExtension({
       const r = onCreated ? onCreated.apply(this, arguments) : undefined;
       const node = this;
 
+      /* 状态行：未下载=黄字提示，已下载=绿色「已下载」 */
+      const status = document.createElement("div");
+      status.style.cssText =
+        "font-size:11px;padding:2px 0 4px;line-height:1.4;word-break:break-all";
+      node._pgDlStatus = status;
+
+      if (node.addDOMWidget) {
+        const dom = node.addDOMWidget("pg_dl_status", "pg_dl_status", status, {
+          getValue: () => "",
+          setValue: () => {},
+          hideOnZoom: false,
+        });
+        if (dom) dom.serialize = false;
+      }
+
       const btn = node.addWidget("button", t("btnDownload"), null, () => {
         const panel = new DownloadPanel(() => {
           node.setDirtyCanvas(true, true);
           toast(t("dlDoneToast"));
+          refreshDownloadState(node);
         });
         panel.init();
       });
 
       /* 语言切换时更新按钮文字 */
       node._pgRelabelDl = () => {
-        if (btn) btn.name = t("btnDownload");
+        if (btn) btn.name = btn.name;      /* 文案由 refreshDownloadState 决定 */
+        refreshDownloadState(node);
         node.setDirtyCanvas(true, true);
       };
 
+      refreshDownloadState(node);
+      return r;
+    };
+
+    /* 从工作流读回时也刷新一次状态 */
+    const onConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function () {
+      const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+      refreshDownloadState(this);
       return r;
     };
   },
 });
+
+/**
+ * 查询素材库是否就绪，据此更新按钮文字与状态行。
+ * 未就绪 → 按钮写「下载素材（首次使用）」+ 黄色提示；已就绪 → 「已下载」+ 绿色状态。
+ */
+async function refreshDownloadState(node) {
+  const st = node._pgDlStatus;
+  let ready = false;
+  let info = null;
+  try {
+    const cfg = await apiJson("/pose_gallery/config");
+    ready = cfg && cfg.ready === true;
+    info = cfg;
+  } catch (e) {
+    ready = false;
+  }
+  const btn = (node.widgets || []).find((w) => w.type === "button" && (
+    w.name === t("btnDownload") || w.name === t("btnDownloaded")));
+  if (ready) {
+    if (btn) btn.name = t("btnDownloaded");
+    if (st) {
+      const n = info && info.total_poses != null ? info.total_poses : "";
+      const m = info && info.total_images != null ? info.total_images : "";
+      st.textContent = n ? t("dlStateReady", { poses: n, images: m }) : t("dlStateReadyShort");
+      st.style.color = "#49c47c";
+    }
+  } else {
+    if (btn) btn.name = t("btnDownload");
+    if (st) {
+      st.textContent = t("dlStateNotReady");
+      st.style.color = "#e0a03c";        /* 黄字提示 */
+    }
+  }
+  if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
+}
 
 /* 语言切换时刷新所有节点的下载按钮 */
 onLangChange(() => {

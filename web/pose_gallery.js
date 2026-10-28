@@ -673,13 +673,23 @@ async function renderNodePreview(node) {
     items.push({ pid, url: cover ? cover.thumb_url : "" });
   }
 
-  /* 预览宽度跟随节点实际可用宽度，保持 3:4；4 张时自动排成两行 */
-  const availW = Math.max(80, Math.min(150, (node.size ? node.size[0] : 270) - 40));
-  const cols = items.length > 1 ? 2 : 1;
-  const W = Math.max(60, Math.floor((availW - (cols - 1) * 8) / cols));
+  /* 预览尺寸：按节点宽度决定每行几列，保持 3:4，尽量一行放下更多张 */
+  const nodeW = node.size ? node.size[0] : 270;
+  const availW = Math.max(80, nodeW - 32);
+  const GAP = 8;
+  const n = items.length;
+  /* 从「每行最多 4 张」往下试，选能放下且缩略图不小于 70px 的方案 */
+  let cols = Math.min(n, 4);
+  while (cols > 1) {
+    const w = Math.floor((availW - (cols - 1) * GAP) / cols);
+    if (w >= 70) break;
+    cols--;
+  }
+  const W = Math.max(56, Math.floor((availW - (cols - 1) * GAP) / cols));
   const H = Math.round((W * 4) / 3);   /* 严格 3:4 */
-  host.style.gap = "8px";
+  host.style.gap = GAP + "px";
   host.style.flexWrap = "wrap";
+  host.style.maxWidth = availW + "px";
 
   for (const it of items) {
     const cell = document.createElement("div");
@@ -712,13 +722,18 @@ async function renderNodePreview(node) {
     host.append(more);
   }
 
-  fitNodePreview(node, H);
+  /* 关键：按「实际行数」算高度，避免第二行溢出节点 */
+  const shown = Math.min(items.length, 4) + (ids.length > 4 ? 1 : 0);
+  const rows = Math.max(1, Math.ceil(shown / cols));
+  const totalH = rows * H + (rows - 1) * GAP;
+  fitNodePreview(node, totalH);
 }
 
 /** 让节点高度包住预览区，避免图被裁掉 */
 function fitNodePreview(node, previewH) {
   if (!node || !node.size) return;
-  const extra = previewH ? previewH + 26 : 0;
+  /* 预览高度 + 上下内边距 8 + 余量 20（用户要求预留缓冲，防止裁切） */
+  const extra = previewH ? previewH + 8 + 20 : 0;
   if (node._pgPreviewBase === undefined) {
     node._pgPreviewBase = node.size[1];
   }
