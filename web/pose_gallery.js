@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { t, getLang, onLangChange, makeLangSwitcher } from "./pose_gallery_i18n.js";
 
 /*
  * Pose Gallery —— 节点内图库选择面板
@@ -14,6 +15,9 @@ import { api } from "../../scripts/api.js";
  *   - 面板：系统 / 分类 / 角度筛选 + 关键词搜索 + 姿态网格
  *   - 点姿态卡片选中；多选模式下可勾多个（批量节点）
  *   - 确认后把选中结果写入节点隐藏 widget（selected_id），前端显示选中缩略图
+ *
+ * 多语言：界面文案走 pose_gallery_i18n.js（中文 / 日本語 / English），默认中文。
+ * 语言切换后重建面板 UI（数据保留，不重新请求）。
  */
 
 const NODE_NAMES = ["PoseGalleryLoader", "PoseGalleryAngleSet", "PoseGalleryBatchLoader"];
@@ -79,16 +83,23 @@ class PickerPanel {
     head.style.cssText =
       "display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid #2c323c;" +
       "background:#11141a;flex:0 0 auto";
-    const title = this._el("div", null, "姿态素材库");
+    const title = this._el("div", null, t("appTitle"));
     title.style.cssText = "font-size:15px;font-weight:700;letter-spacing:.02em";
     const sub = this._el("div", null, "");
     sub.style.cssText = "color:#8b93a1;font-size:12px";
     this.subEl = sub;
+    this.titleEl = title;
     head.append(title, sub);
 
     const spacer = this._el("div");
     spacer.style.cssText = "flex:1";
+
+    /* 语言切换（中文 / 日本語 / English） */
+    this.langSwitcher = makeLangSwitcher(() => this._relabel());
+    head.append(this.langSwitcher);
+
     const closeBtn = this._el("button", null, "✕");
+    closeBtn.title = t("close");
     closeBtn.style.cssText =
       "width:34px;height:34px;border-radius:8px;border:1px solid #39404b;background:#1b1f27;" +
       "color:#cfd5de;cursor:pointer;font-size:15px";
@@ -101,13 +112,13 @@ class PickerPanel {
       "display:flex;flex-wrap:wrap;gap:10px;padding:12px 18px;border-bottom:1px solid #23282f;" +
       "background:#13161c;flex:0 0 auto;align-items:center";
 
-    this.selSystem = this._select(bar, "系统");
-    this.selCategory = this._select(bar, "分类");
-    this.selAngle = this._select(bar, "角度");
+    this.selSystem = this._select(bar, "filterSystem", "allSystem");
+    this.selCategory = this._select(bar, "filterCategory", "allCategory");
+    this.selAngle = this._select(bar, "filterAngle", "allAngle");
 
     const q = document.createElement("input");
     q.type = "search";
-    q.placeholder = "搜索名称 / 编号 / 分类…";
+    q.placeholder = t("searchPlaceholder");
     q.style.cssText =
       "flex:1;min-width:180px;height:32px;padding:0 12px;border-radius:8px;" +
       "border:1px solid #39404b;background:#0f1217;color:#e6e9ee;outline:none";
@@ -136,19 +147,19 @@ class PickerPanel {
     this.countEl = this._el("div", null, "");
     this.countEl.style.cssText = "color:#8b93a1;font-size:12px;flex:1";
 
-    const btnMore = this._btn("加载更多");
-    btnMore.onclick = () => this.load(this.offset + this.limit, true);
+    this.btnMore = this._btn(t("loadMore"));
+    this.btnMore.onclick = () => this.load(this.offset + this.limit, true);
 
-    const btnClear = this._btn("清空选择");
-    btnClear.onclick = () => { this.selected.clear(); this._sync(); this._render(); };
+    this.btnClearSel = this._btn(t("clearSelection"));
+    this.btnClearSel.onclick = () => { this.selected.clear(); this._sync(); this._render(); };
 
-    const btnOk = this._btn("确定", true);
-    btnOk.onclick = () => {
+    this.btnOk = this._btn(t("btnOk"), true);
+    this.btnOk.onclick = () => {
       this.onPick([...this.selected]);
       this.close();
     };
 
-    foot.append(this.countEl, btnMore, btnClear, btnOk);
+    foot.append(this.countEl, this.btnMore, this.btnClearSel, this.btnOk);
 
     box.append(head, bar, grid, foot);
     wrap.append(box);
@@ -169,15 +180,19 @@ class PickerPanel {
     document.addEventListener("keydown", esc, true);
   }
 
-  _select(parent, label) {
+  _select(parent, labelKey, allKey) {
     const sel = document.createElement("select");
     sel.style.cssText =
       "height:32px;padding:0 10px;border-radius:8px;border:1px solid #39404b;" +
       "background:#0f1217;color:#e6e9ee;outline:none;cursor:pointer";
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = label + "：全部";
+    opt.textContent = t(allKey);
+    opt.dataset.i18nKey = allKey;
     sel.append(opt);
+    /* 记住 key，切换语言时可重建 */
+    sel.dataset.labelKey = labelKey;
+    sel.dataset.allKey = allKey;
     parent.append(sel);
     return sel;
   }
@@ -192,15 +207,45 @@ class PickerPanel {
     return b;
   }
 
+  /** 语言切换后刷新静态文案（保留已加载数据与选中状态） */
+  _relabel() {
+    if (this.titleEl) this.titleEl.textContent = t("appTitle");
+    if (this.qEl) this.qEl.placeholder = t("searchPlaceholder");
+    this._relabelAllOption(this.selSystem);
+    this._relabelAllOption(this.selCategory);
+    this._relabelAllOption(this.selAngle);
+    if (this.btnMore) this.btnMore.textContent = t("loadMore");
+    if (this.btnClearSel) this.btnClearSel.textContent = t("clearSelection");
+    if (this.btnOk) this.btnOk.textContent = t("btnOk");
+    this._paintSub();
+    this._render();          // 重绘网格以更新计数文案等
+  }
+
+  _relabelAllOption(sel) {
+    if (!sel) return;
+    const first = sel.querySelector("option");
+    if (first && first.dataset.i18nKey) {
+      first.textContent = t(first.dataset.i18nKey);
+    }
+  }
+
+  _paintSub() {
+    if (!this.subEl) return;
+    if (this.cfg) {
+      this.subEl.textContent =
+        `${this.cfg.title || t("appTitle")} · ${this.cfg.total_poses} ${t("posesUnit")} / ` +
+        `${this.cfg.total_images} ${t("imagesUnit")}`;
+    }
+  }
+
   async init() {
     try {
       this.cfg = await apiJson("/pose_gallery/config");
     } catch (e) {
-      this._error("读取图库配置失败：" + e.message);
+      this._error(t("configFail", { msg: e.message }));
       return;
     }
-    this.subEl.textContent =
-      `${this.cfg.title || "姿态素材库"} · ${this.cfg.total_poses} 姿态 / ${this.cfg.total_images} 张`;
+    this._paintSub();
     this._fill(this.selSystem, this.cfg.systems);
     this._fill(this.selCategory, this.cfg.categories);
     this._fill(this.selAngle, this.cfg.angles);
@@ -236,7 +281,7 @@ class PickerPanel {
     try {
       data = await apiJson("/pose_gallery/poses?" + p.toString());
     } catch (e) {
-      this._error("读取姿态列表失败：" + e.message);
+      this._error(t("listFail", { msg: e.message }));
       return;
     }
     this.offset = offset;
@@ -293,20 +338,20 @@ class PickerPanel {
     }
 
     if (!this.poses.length) {
-      const d = this._el("div", null, "没有符合条件的姿态");
+      const d = this._el("div", null, t("emptyResult"));
       d.style.cssText = "grid-column:1/-1;padding:40px;text-align:center;color:#7d8592";
       this.gridEl.append(d);
     }
 
     this.countEl.textContent =
-      `共 ${this.total} 个姿态 · 已显示 ${this.poses.length}` +
-      (this.multi ? " · 可多选" : " · 单选");
+      t("poseTotal", { total: this.total, shown: this.poses.length }) +
+      (this.multi ? t("multiHint") : t("singleHint"));
     this._sync();
   }
 
   _sync() {
     const n = this.selected.size;
-    this.selInfoEl.textContent = n ? `已选 ${n} 项` : "";
+    this.selInfoEl.textContent = n ? t("selectedN", { n }) : "";
   }
 
   close() {
@@ -346,9 +391,18 @@ function paintSelection(node) {
   const ids = selectedOf(node);
   if (!node._pgBadge) return;
   node._pgBadge.textContent = ids.length
-    ? (ids.length === 1 ? ids[0] : `已选 ${ids.length} 项`)
-    : "未选择";
+    ? (ids.length === 1 ? t("selectedOne", { id: ids[0] }) : t("selectedMany", { n: ids.length }))
+    : t("notSelected");
   node._pgBadge.style.color = ids.length ? "#8fb4ff" : "#7d8592";
+}
+
+/** 语言切换后刷新所有已创建节点的按钮文字与状态标签 */
+function relabelNodes() {
+  const nodes = (app.graph && app.graph._nodes) || [];
+  for (const node of nodes) {
+    if (!NODE_NAMES.includes(node.comfyClass)) continue;
+    if (node._pgRelabel) node._pgRelabel();
+  }
 }
 
 app.registerExtension({
@@ -381,7 +435,7 @@ app.registerExtension({
       }
 
       /* 打开图库按钮 */
-      node.addWidget("button", "① 打开图库选择", null, () => {
+      const btnOpen = node.addWidget("button", t("btnOpenPicker"), null, () => {
         const panel = new PickerPanel(node, (ids) => {
           const w = ensureHiddenWidget(node);
           w.value = JSON.stringify(ids);
@@ -395,12 +449,20 @@ app.registerExtension({
         });
       });
 
-      node.addWidget("button", "② 清空选择", null, () => {
+      const btnClear = node.addWidget("button", t("btnClear"), null, () => {
         const w = ensureHiddenWidget(node);
         w.value = "";
         paintSelection(node);
         node.setDirtyCanvas(true, true);
       });
+
+      /* 供语言切换时调用 */
+      node._pgRelabel = () => {
+        if (btnOpen) btnOpen.name = t("btnOpenPicker");
+        if (btnClear) btnClear.name = t("btnClear");
+        paintSelection(node);
+        node.setDirtyCanvas(true, true);
+      };
 
       paintSelection(node);
       return r;
@@ -415,3 +477,6 @@ app.registerExtension({
     };
   },
 });
+
+/* 语言切换时，刷新画布上所有本插件节点 */
+onLangChange(() => relabelNodes());
