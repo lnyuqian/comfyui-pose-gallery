@@ -136,29 +136,141 @@ async function refreshPreviewData(node) {
 /* 布局：节点高度按「基准 + 预览区高度」计算                            */
 /* ------------------------------------------------------------------ */
 
-/** 预览区 + 状态行总高度 */
-function previewBlockHeight(node) {
-  const gridH = previewGridHeight(node);
-  const hasItems = (node._pgItems || []).length > 0;
-  const statusH = node._pgDlText ? 18 : 0;
-  if (!hasItems) {
-    /* 未选时只有「未选择」提示 + 状态行 */
-    return (node._pgDlText ? 22 : 22) + statusH;
-  }
-  return gridH + PREV_PAD * 2 + statusH;
+/* ------------------------------------------------------------------ */
+/* 布局槽位：预览占位 + 高度计算                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 在 ③ 展示线稿图 之后插入一个「预览占位槽」。
+ * 占位槽自身参与 litegraph 的高度计算，因此线稿会自然出现在
+ * ③ 按钮下方、下载按钮上方，不需要手工改 node.size。
+ */
+function ensurePreviewSpacer(node) {
+  if (node._pgSpacer) return node._pgSpacer;
+  const spacer = {
+    name: "pg_preview_spacer",
+    type: "pg_spacer",
+    value: "",
+    serialize: false,
+    computeSize: function (width) {
+      return [width || node.size[0], previewGridHeight(node) + PREV_PAD * 2];
+    },
+    draw: function () { /* 由 onDrawForeground 统一绘制 */ },
+    mouse: () => false,
+  };
+  node._pgSpacer = spacer;
+
+  /* 插到 ③ 展示线稿图 后面 */
+  const showIdx = (node.widgets || []).findIndex(
+    (w) => w.name === t("btnShowSketch")
+  );
+  if (showIdx >= 0) node.widgets.splice(showIdx + 1, 0, spacer);
+  else node.widgets.push(spacer);
+  return spacer;
 }
 
-/** 让节点高度包住预览区；无预览时回到基准高度 */
-function fitNodePreview(node) {
-  if (!node || !node.size) return;
-  if (node._pgPreviewBase === undefined) {
-    node._pgPreviewBase = node.size[1];
+/** 把占位槽挪到 ③ 展示线稿图 之后（语言切换后按钮名会变，需要重定位） */
+function pinSpacerAfterShow(node) {
+  const spacer = node._pgSpacer;
+  if (!spacer || !node.widgets) return;
+  const cur = node.widgets.indexOf(spacer);
+  if (cur >= 0) node.widgets.splice(cur, 1);
+  const btn = node.widgets.find((w) => w.name === t("btnShowSketch"));
+  const idx = btn ? node.widgets.indexOf(btn) : node.widgets.length - 1;
+  node.widgets.splice(idx + 1, 0, spacer);
+}
+
+/* ① 打开图库选择 上方留白（像素） */
+const GAP_BEFORE_PICKER = 15;
+
+/**
+ * 在「① 打开图库选择」之前插入一个纯高度占位槽，
+ * 把按钮组整体往下推 15px，与上方参数区拉开距离。
+ */
+function ensureTopGap(node) {
+  if (node._pgTopGap) return node._pgTopGap;
+  const gap = {
+    name: "pg_top_gap",
+    type: "pg_gap",
+    value: "",
+    serialize: false,
+    computeSize: function (width) {
+      return [width || node.size[0], GAP_BEFORE_PICKER];
+    },
+    draw: function () { /* 纯留白，不绘制 */ },
+    mouse: () => false,
+  };
+  node._pgTopGap = gap;
+  const idx = (node.widgets || []).findIndex((w) => w.name === t("btnOpenPicker"));
+  if (idx >= 0) node.widgets.splice(idx, 0, gap);
+  else node.widgets.push(gap);
+  return gap;
+}
+
+/** 语言切换后把占位槽重新插回 ① 之前（按钮名会变） */
+function pinTopGapBeforePicker(node) {
+  const gap = node._pgTopGap;
+  if (!gap || !node.widgets) return;
+  const cur = node.widgets.indexOf(gap);
+  if (cur >= 0) node.widgets.splice(cur, 1);
+  const btn = node.widgets.find((w) => w.name === t("btnOpenPicker"));
+  const idx = btn ? node.widgets.indexOf(btn) : 0;
+  node.widgets.splice(idx, 0, gap);
+}
+
+/**
+ * 底部状态行与下载按钮同行绘制，不再需要独立占位槽。
+ * 保留空实现以兼容调用点。
+ */
+function ensureStatusSpacer(node) {
+  return node._pgStatusSpacer;
+}
+
+/**
+ * 底部状态行不再单独占一行（与下载按钮同行绘制），
+ * 保留该函数以兼容旧调用点，直接同步布局即可。
+ */
+function pinStatusSpacerLast(node) {
+  const sp = node._pgStatusSpacer;
+  if (!sp || !node.widgets) return;
+  /* 若历史上插过占位槽，这里把它移除 */
+  const i = node.widgets.indexOf(sp);
+  if (i >= 0) node.widgets.splice(i, 1);
+  node._pgStatusSpacer = undefined;
+}
+
+/**
+ * 把下载按钮挪到 widget 列表最后一位。
+ * Downloader 扩展的 onNodeCreated 可能先于 Picker 执行，导致按钮被插在前面。
+ */
+function pinDownloadButtonLast(node) {
+  if (!node || !node.widgets) return;
+  const btn = node._pgDlBtn ||
+    node.widgets.find((w) => w.type === "button" &&
+      (w.name === t("btnDownload") || w.name === t("btnDownloaded")));
+  if (!btn) return;
+  /* 下载按钮 -> 状态行占位槽 的顺序：按钮先，占位槽后 */
+  const i = node.widgets.indexOf(btn);
+  const sp = node._pgStatusSpacer;
+  if (i >= 0) node.widgets.splice(i, 1);
+  node.widgets.push(btn);
+  if (sp) {
+    const j = node.widgets.indexOf(sp);
+    if (j >= 0) node.widgets.splice(j, 1);
+    node.widgets.push(sp);
   }
-  const want = node._pgPreviewBase + previewBlockHeight(node);
-  if (Math.abs((node.size[1] || 0) - want) > 1) {
-    node.size[1] = want;
-  }
-  if (app && app.canvas) app.canvas.setDirty(true, true);
+}
+
+/** 预览网格高度（不含上下内边距） */
+function previewGridHeight(node) {
+  const items = node._pgItems || [];
+  if (!items.length) return 0;
+  const nodeW = node.size ? node.size[0] : 300;
+  const availW = Math.max(80, nodeW - 24);
+  const cols = Math.max(1, Math.floor((availW + PREV_GAP) / (PREV_W + PREV_GAP)));
+  const shown = Math.min(items.length, 4) + ((node._pgOverflow || 0) > 0 ? 1 : 0);
+  const rows = Math.max(1, Math.ceil(shown / cols));
+  return rows * PREV_H + (rows - 1) * PREV_GAP;
 }
 
 /** 高度变化后触发重排与重绘 */
@@ -172,34 +284,36 @@ function relayoutNode(node) {
   if (app && app.canvas) app.canvas.setDirty(true, true);
 }
 
+/** 节点高度由占位槽自然撑开；这里只负责把占位槽尺寸同步给 litegraph 并重绘 */
+function fitNodePreview(node) {
+  const spacer = node._pgSpacer;
+  if (spacer) {
+    spacer.computeSize = function (width) {
+      return [width || node.size[0], previewGridHeight(node) + PREV_PAD * 2];
+    };
+  }
+  if (app && app.canvas) app.canvas.setDirty(true, true);
+}
+
 /**
- * canvas 自绘：线稿预览 + 下载状态行。
- * 绘制区域锚定在节点「底部预留空间」内（fitNodePreview 把这部分高度加在最下方），
- * 所以不会盖住上面的参数行。
+ * canvas 自绘：线稿预览（画在占位槽位置）+ 下载状态（画在最底部按钮那一行）。
  */
 function drawNodePreview(node, ctx) {
   if (!ctx) return;
   const items = node._pgItems || [];
   const nodeW = node.size ? node.size[0] : 300;
-  const blockH = previewBlockHeight(node);
-  /* 预留区起点：节点底部往上 blockH */
-  const baseY = Math.max(0, (node.size ? node.size[1] : 0) - blockH);
+  const spacer = node._pgSpacer;
 
-  /* 未选择：一行灰字提示 */
+  /* 预览区起点 = 占位槽的 y（即 ③ 按钮下一行） */
   if (!items.length) {
-    ctx.save();
-    ctx.fillStyle = "#7d8592";
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(t("notSelected"), 10, baseY + 2);
-    ctx.restore();
-    drawDownloadStatus(node, ctx, baseY + 20);
+    drawDownloadStatus(node, ctx);
     return;
   }
+  const startY = spacer && spacer.last_y !== undefined
+    ? spacer.last_y + PREV_PAD
+    : 10;
 
   ctx.save();
-  const startY = baseY + PREV_PAD;
   const availW = Math.max(80, nodeW - 24);
   const cols = Math.max(1, Math.floor((availW + PREV_GAP) / (PREV_W + PREV_GAP)));
 
@@ -207,28 +321,24 @@ function drawNodePreview(node, ctx) {
     const c = i % cols;
     const r = Math.floor(i / cols);
     const x = 10 + c * (PREV_W + PREV_GAP);
-    const y = startY + r * (PREV_H + CAP_H + PREV_GAP);
+    const y = startY + r * (PREV_H + PREV_GAP);
 
-    /* 底板 */
     ctx.fillStyle = "#f2f2f0";
     ctx.fillRect(x, y, PREV_W, PREV_H);
-    /* 线稿 */
     if (it.img && it.img.width) {
       ctx.drawImage(it.img, x, y, PREV_W, PREV_H);
     }
-    /* 边框 */
     ctx.strokeStyle = "#2a303a";
     ctx.lineWidth = 1;
     ctx.strokeRect(x + 0.5, y + 0.5, PREV_W - 1, PREV_H - 1);
   });
 
-  /* 超出 4 张的 +N 提示 */
   if ((node._pgOverflow || 0) > 0) {
     const idx = items.length;
     const c = idx % cols;
     const r = Math.floor(idx / cols);
     const x = 10 + c * (PREV_W + PREV_GAP);
-    const y = startY + r * (PREV_H + CAP_H + PREV_GAP);
+    const y = startY + r * (PREV_H + PREV_GAP);
     ctx.fillStyle = "#8fb4ff";
     ctx.font = "12px system-ui, sans-serif";
     ctx.textAlign = "left";
@@ -237,39 +347,48 @@ function drawNodePreview(node, ctx) {
   }
   ctx.restore();
 
-  /* 状态行紧接在预览区下方 */
-  drawDownloadStatus(node, ctx, startY + previewGridHeight(node) + 4);
+  drawDownloadStatus(node, ctx);
 }
 
-/** 下载状态行：画在预览区下方（同一行显示提示与数量） */
-function drawDownloadStatus(node, ctx, top) {
+/**
+ * 下载状态：与「最下面那个卡槽」（下载按钮）同一行，靠左绘制。
+ * 按钮文字居中，左侧留白正好放状态文字，互不重叠。
+ */
+function drawDownloadStatus(node, ctx) {
   const text = node._pgDlText;
   if (!text) return;
   const nodeW = node.size ? node.size[0] : 300;
+
+  /* 取下载按钮所在行（最底部那个卡槽） */
+  let rowY = null;
+  const dlBtn = (node.widgets || []).find((w) => w.type === "button" &&
+    (w.name === t("btnDownload") || w.name === t("btnDownloaded")));
+  if (dlBtn && dlBtn.last_y !== undefined) {
+    rowY = dlBtn.last_y;
+  }
+  if (rowY === null) {
+    rowY = Math.max(0, (node.size ? node.size[1] : 0) - 30);
+  }
+  /* 按钮默认行高按 24~26px 估算，居中绘制 */
+  const rowH = 26;
+
   ctx.save();
   ctx.fillStyle = node._pgDlColor || "#e0a03c";
   ctx.font = "11px system-ui, sans-serif";
   ctx.textAlign = "left";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "middle";
+  /* 按钮文字居中，左侧留白足够放状态文字；只避开中央按钮标签区 */
+  const maxW = Math.max(120, nodeW - 160);
   let shown = text;
-  while (ctx.measureText(shown).width > nodeW - 20 && shown.length > 6) {
+  while (ctx.measureText(shown).width > maxW && shown.length > 6) {
     shown = shown.slice(0, -1);
   }
-  ctx.fillText(shown, 10, top);
+  ctx.fillText(shown, 10, rowY + rowH / 2);
   ctx.restore();
 }
 
-/** 预览网格高度（不含上下内边距） */
-function previewGridHeight(node) {
-  const items = node._pgItems || [];
-  if (!items.length) return 0;
-  const nodeW = node.size ? node.size[0] : 300;
-  const availW = Math.max(80, nodeW - 24);
-  const cols = Math.max(1, Math.floor((availW + PREV_GAP) / (PREV_W + PREV_GAP)));
-  const shown = Math.min(items.length, 4) + ((node._pgOverflow || 0) > 0 ? 1 : 0);
-  const rows = Math.max(1, Math.ceil(shown / cols));
-  return rows * (PREV_H + CAP_H) + (rows - 1) * PREV_GAP;
-}
+/** 状态行高度（需要在节点高度里预留） */
+const STATUS_ROW_H = 22;
 
 /* ------------------------------------------------------------------ */
 /* 多行输入框高度限制                                                  */
@@ -331,7 +450,7 @@ app.registerExtension({
       node._pgItems = [];
       node._pgOverflow = 0;
 
-      /* 打开图库选择 → 选完直接把线稿画到节点上 */
+      /* ① 打开图库选择 → 选完直接把线稿画到节点上 */
       const btnOpen = node.addWidget("button", t("btnOpenPicker"), null, () => {
         const panel = new PickerPanel(node, (ids) => {
           const w = ensureHiddenWidget(node);
@@ -345,10 +464,7 @@ app.registerExtension({
         });
       });
 
-      const btnShow = node.addWidget("button", t("btnShowSketch"), null, () => {
-        refreshPreviewData(node);
-      });
-
+      /* ② 清空选择（必须排在「③ 展示线稿图」之前，否则界面会出现 1/3/2 的错序） */
       const btnClear = node.addWidget("button", t("btnClear"), null, () => {
         const w = ensureHiddenWidget(node);
         w.value = "";
@@ -356,11 +472,32 @@ app.registerExtension({
         node.setDirtyCanvas(true, true);
       });
 
+      /* ③ 展示线稿图 */
+      const btnShow = node.addWidget("button", t("btnShowSketch"), null, () => {
+        refreshPreviewData(node);
+      });
+
+      /* 线稿预览占位槽：插在 ③ 之下、下载按钮之前 */
+      ensurePreviewSpacer(node);
+      /* ① 上方留白 15px，把按钮组与参数区拉开 */
+      ensureTopGap(node);
+      /* 底部状态行占位槽（画绿色「素材已下载 · N 个姿态 / M 张图」） */
+      ensureStatusSpacer(node);
+      /* 供下载器在状态文字变化后刷新高度 */
+      node._pgDlStatusSync = () => {
+        pinStatusSpacerLast(node);
+        relayoutNode(node);
+      };
+
       node._pgRelabel = () => {
         if (btnOpen) btnOpen.name = t("btnOpenPicker");
         if (btnShow) btnShow.name = t("btnShowSketch");
         if (btnClear) btnClear.name = t("btnClear");
-        paintSelection(node);        /* 重新解析选中项并重排，确保外部改 selected_id 后也能刷新 */
+        pinTopGapBeforePicker(node);
+        pinSpacerAfterShow(node);
+        pinStatusSpacerLast(node);
+        pinDownloadButtonLast(node);
+        paintSelection(node);
         node.setDirtyCanvas(true, true);
       };
 
@@ -375,10 +512,13 @@ app.registerExtension({
       shrinkMultilineWidgets(node);
       paintSelection(node);
 
-      /* 首帧后把「无预览」的稳定高度固化为基准 */
+      /* 首帧后重排一次，让占位槽高度生效，并把下载按钮归位到最后 */
       requestAnimationFrame(() => {
         shrinkMultilineWidgets(node);
-        node._pgPreviewBase = node.size ? node.size[1] : undefined;
+        pinTopGapBeforePicker(node);
+        pinSpacerAfterShow(node);
+        pinStatusSpacerLast(node);
+        pinDownloadButtonLast(node);
         relayoutNode(node);
       });
       return r;

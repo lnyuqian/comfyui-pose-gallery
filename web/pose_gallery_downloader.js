@@ -391,17 +391,18 @@ async function refreshDownloadState(node) {
     (node.widgets || []).find((w) => w.type === "button" && (
       w.name === t("btnDownload") || w.name === t("btnDownloaded")));
   if (ready) {
-    if (btn) btn.name = t("btnDownloaded");
-    /* 提示与数量合并为同一行 */
+    /* 提示与数量合并进按钮名，一行显示，不额外占高度也不被裁剪 */
     const n = info && info.total_poses != null ? info.total_poses : 0;
     const m = info && info.total_images != null ? info.total_images : 0;
-    node._pgDlText = t("dlStateReadyLine", { poses: n, images: m });
+    if (btn) btn.name = t("dlBtnReadyLine", { poses: n, images: m });
+    node._pgDlText = "";              /* 不再额外绘制文字 */
     node._pgDlColor = "#49c47c";
   } else {
     if (btn) btn.name = t("btnDownload");
-    node._pgDlText = t("dlStateNotReady");
-    node._pgDlColor = "#e0a03c";        /* 黄字提示 */
+    node._pgDlText = "";
+    node._pgDlColor = "#e0a03c";
   }
+  if (node._pgDlStatusSync) node._pgDlStatusSync();
   if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
   if (node.graph && node.graph.setDirtyCanvas) node.graph.setDirtyCanvas(true, true);
 }
