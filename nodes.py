@@ -519,6 +519,92 @@ class PoseGalleryPickOne:
 
 
 # ---------------------------------------------------------------------------
+# 辅助节点：把「姿态名称」变成提示词，帮模型读懂线稿
+# ---------------------------------------------------------------------------
+
+# 分类 → 更贴近画面描述的说法（线稿本身没有五官和服装，越具体的体位描述越有用）
+_CATEGORY_HINT = {
+    "站立": "站姿",
+    "立位": "站姿",
+    "跪姿": "跪姿",
+    "跪姿·四肢着地": "跪姿",
+    "蹲姿": "蹲姿，膝盖弯曲",
+    "坐姿": "坐姿",
+    "侧坐·女孩坐": "侧坐",
+    "躺卧": "躺卧",
+    "俯身": "身体前倾俯下",
+    "后仰·反弓": "身体后仰，腰背反弓",
+    "扭转": "躯干扭转",
+}
+
+# 姿态名里已经写明体位的词；命中就不再叠加分类提示，避免两句话互相打架
+# （例如分类写「跪姿·四肢着地」而名称是「跪立扭腰·单臂上举」，叠加后模型会画成趴着）
+_NAME_HAS_POSTURE = ("站", "坐", "跪", "蹲", "躺", "卧", "趴", "伏", "仰", "俯身", "抬腿")
+
+
+class PoseGalleryPosePrompt:
+    """从批次的 META_JSON 里取第 index 个姿态，拼成一段姿态描述提示词。
+
+    为什么需要它：`TextEncodeQwenImage21` 一次只吃一张参考图（源码 `image[:1]`），
+    批量出图必须每条分支各自喂一张。而线稿只有人体结构、没有语义，
+    模型容易按训练分布自由发挥（例如把「单腿抬至肩高」画成「举手摸头发」）。
+    把该姿态在库里的中文名称一起写进提示词，可以显著提高姿态还原度。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "meta_json": ("STRING", {"forceInput": True}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 4095, "step": 1}),
+            },
+            "optional": {
+                "prefix": ("STRING", {"default": "画面里的人物姿态：", "multiline": False}),
+                "suffix": ("STRING", {"default": "", "multiline": False}),
+                "include_category": ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("PROMPT", "POSE_NAME")
+    FUNCTION = "build"
+    CATEGORY = "Pose Gallery"
+    DESCRIPTION = ("从批次的 META_JSON 取第 index 个姿态，输出「姿态描述」提示词。"
+                   "批量出图时给每条分支接一个，可明显改善线稿姿态还原度。")
+
+    def build(self, meta_json, index=0, prefix="画面里的人物姿态：", suffix="",
+              include_category=True):
+        try:
+            items = json.loads(meta_json) if meta_json else []
+        except Exception:
+            items = []
+        if not isinstance(items, list):
+            items = []
+        if not items:
+            return ("", "")
+        i = max(0, min(int(index), len(items) - 1))
+        item = items[i] if isinstance(items[i], dict) else {}
+
+        name = str(item.get("name") or "").strip()
+        category = str(item.get("category") or "").strip()
+        if not name and not category:
+            return ("", "")
+
+        bits = []
+        hint = _CATEGORY_HINT.get(category)
+        # 名称里已经写明体位时，分类只作弱提示：避免「跪立」被分类「四肢着地」带偏成趴着
+        name_states_posture = any(w in name for w in _NAME_HAS_POSTURE)
+        if include_category and hint and not name_states_posture:
+            bits.append(hint)
+        if name:
+            bits.append(name)
+        body = "，".join(b for b in bits if b)
+
+        prompt = "%s%s%s" % (prefix or "", body, suffix or "")
+        return (prompt, name or category)
+
+
+# ---------------------------------------------------------------------------
 # 注册表
 # ---------------------------------------------------------------------------
 
@@ -527,6 +613,7 @@ NODE_CLASS_MAPPINGS = {
     "PoseGalleryAngleSet": PoseGalleryAngleSet,
     "PoseGalleryBatchLoader": PoseGalleryBatchLoader,
     "PoseGalleryPickOne": PoseGalleryPickOne,
+    "PoseGalleryPosePrompt": PoseGalleryPosePrompt,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -534,4 +621,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PoseGalleryAngleSet": "姿态库 · 角度组（5 角度）",
     "PoseGalleryBatchLoader": "姿态库 · 批量",
     "PoseGalleryPickOne": "姿态库 · 从批次取单张",
+    "PoseGalleryPosePrompt": "姿态库 · 姿态描述提示词",
 }
