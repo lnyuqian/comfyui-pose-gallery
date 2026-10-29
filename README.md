@@ -46,9 +46,10 @@ remembers its size.
 *图库面板：288 姿态 / 1439 张图，三档缩略图宽度，可拖拽缩放*
 *Gallery panel: 288 poses / 1439 images, three thumbnail presets, resizable*
 
-<img src="docs/screenshots/node-inline.png" alt="节点内联线稿 Inline sketch on node" width="720">
+<img src="docs/screenshots/node-inline.png" alt="节点内联线稿 Inline sketch on node" width="620">
 
-*选中后线稿直接显示在节点上 / The selected sketch renders inline on the node*
+*节点布局：参数 → 15px 留白 → ①②③ 按钮 → 三张线稿（90×120，紧贴③下方）→ 下载按钮（含姿态/图片计数）*
+*Node layout: parameters → 15px gap → buttons ①②③ → three 90×120 sketches under ③ → download button with counts*
 
 <details>
 <summary>三档缩略图宽度对比 / Thumbnail width presets</summary>
