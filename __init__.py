@@ -213,27 +213,6 @@ def _register_routes():
             "message": "下载已开始，轮询 /pose_gallery/download/status 查看进度",
         })
 
-    @routes.get("/pose_gallery/download/preview")
-    async def api_dl_preview(request):
-        """下载前先告诉用户要下多少、多大 —— 避免直接闷头拉 700MB。"""
-        from . import downloader as dlm
-        try:
-            idx = dlm.fetch_index()
-        except Exception as exc:
-            return web.json_response({"ok": False, "error": str(exc)}, status=502)
-        meta = idx["meta"]
-        est = meta["total_images"] * (0.015 + 0.41)  # 缩略图 ~15KB + 原图 ~410KB
-        return web.json_response({
-            "ok": True,
-            "total_poses": meta["total_poses"],
-            "total_images": meta["total_images"],
-            "est_mb_thumbs": round(meta["total_images"] * 0.015, 1),
-            "est_mb_fulls": round(meta["total_images"] * 0.41, 1),
-            "est_mb_total": round(est, 1),
-            "source": meta.get("source_url", ""),
-            "license_note": meta.get("license_note", ""),
-        })
-
     @routes.get("/pose_gallery/poses")
     async def api_poses(request):
         q = request.query
@@ -314,14 +293,6 @@ def _register_routes():
             },
         })
 
-    @routes.get("/pose_gallery/stats")
-    async def api_stats(request):
-        try:
-            store = _get_store()
-        except GalleryError as exc:
-            return web.json_response({"ok": False, "error": str(exc)}, status=500)
-        return web.json_response({"ok": True, "stats": store.stats()})
-
     @routes.get("/pose_gallery/thumb")
     async def api_thumb(request):
         """按 image_id 回缩略图（前端网格用它，省得拼路径）。"""
@@ -338,23 +309,6 @@ def _register_routes():
         if not thumb or not os.path.isfile(thumb):
             raise web.HTTPNotFound()
         return web.FileResponse(thumb)
-
-    @routes.get("/pose_gallery/full")
-    async def api_full(request):
-        """原图（点击放大时用）。"""
-        iid = request.query.get("image_id", "")
-        try:
-            store = _get_store()
-        except GalleryError as exc:
-            return web.json_response({"ok": False, "error": str(exc)}, status=500)
-        hit = store.by_image_id.get(iid)
-        if not hit:
-            raise web.HTTPNotFound()
-        pose, angle, info = hit
-        full = store.abs_path(info.get("full"))
-        if not full or not os.path.isfile(full):
-            raise web.HTTPNotFound()
-        return web.FileResponse(full)
 
     return True
 

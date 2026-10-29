@@ -596,11 +596,31 @@ const HIDDEN_NAME = "selected_id";
 
 function ensureHiddenWidget(node) {
   let w = node.widgets && node.widgets.find((x) => x.name === HIDDEN_NAME);
-  if (w) return w;
-  w = node.addWidget("text", HIDDEN_NAME, "", () => {}, { serialize: true });
-  w.computeSize = () => [0, -4];        // 不在 UI 上占高度
-  w.type = "hidden";
-  if (w.element) w.element.style.display = "none";
+  if (w) {
+    /* 旧版本可能已建出可见输入框，这里兜底移除 */
+    if (w.element && w.element.parentElement) {
+      w.element.parentElement.removeChild(w.element);
+    }
+    w.element = undefined;
+    w.computeSize = () => [0, -4];
+    w.draw = () => {};
+    w.type = "hidden";
+    return w;
+  }
+  /* 纯数据 widget：不创建 DOM、不绘制、不占高度，但仍参与工作流序列化。
+     不能用 addWidget("text")——新版 ComfyUI 会把它渲染成可见输入框，
+     把内部 JSON 明文显示在节点上。 */
+  w = {
+    name: HIDDEN_NAME,
+    type: "hidden",
+    value: "",
+    options: { serialize: true },
+    serialize: true,
+    computeSize: () => [0, -4],
+    draw: () => {},
+    mouse: () => false,
+  };
+  node.widgets.push(w);
   return w;
 }
 
@@ -618,11 +638,30 @@ function selectedOf(node) {
 function paintSelection(node) {
   const ids = selectedOf(node);
   if (!node._pgBadge) return;
-  node._pgBadge.textContent = ids.length
-    ? (ids.length === 1 ? t("selectedOne", { id: ids[0] }) : t("selectedMany", { n: ids.length }))
-    : t("notSelected");
-  node._pgBadge.style.color = ids.length ? "#8fb4ff" : "#7d8592";
+  /* 已选时不再重复显示数量——下方预览图本身已带 pose_id 标签；
+     只在「未选择」时给一行提示。 */
+  if (ids.length) {
+    node._pgBadge.textContent = "";
+    node._pgBadge.style.display = "none";
+  } else {
+    node._pgBadge.textContent = t("notSelected");
+    node._pgBadge.style.display = "";
+    node._pgBadge.style.color = "#7d8592";
+  }
   renderNodePreview(node);
+  syncPickerWrapHeight(node);
+}
+
+/** pg_picker 是 DOM widget，内容为空时把它压成 0 高度，避免节点中出现大片空白 */
+function syncPickerWrapHeight(node) {
+  const wrap = node._pgWrap;
+  if (!wrap) return;
+  const badgeOn = !!(node._pgBadge && node._pgBadge.textContent &&
+                     node._pgBadge.style.display !== "none");
+  const prevOn = !!(node._pgPreview && node._pgPreview.style.display !== "none" &&
+                    node._pgPreview.children.length);
+  wrap.style.height = (badgeOn || prevOn) ? "auto" : "0px";
+  wrap.style.overflow = (badgeOn || prevOn) ? "visible" : "hidden";
 }
 
 /* ------------------------------------------------------------------ */
@@ -661,6 +700,7 @@ async function renderNodePreview(node) {
   if (!ids.length) {
     host.style.display = "none";
     fitNodePreview(node, 0);
+    syncPickerWrapHeight(node);
     return;
   }
   host.style.display = "flex";
@@ -673,19 +713,22 @@ async function renderNodePreview(node) {
     items.push({ pid, url: cover ? cover.thumb_url : "" });
   }
 
-  /* 预览尺寸：按节点宽度决定每行几列，保持 3:4，尽量一行放下更多张 */
+  /* 预览尺寸：按节点宽度决定每行几列，保持 3:4 */
   const nodeW = node.size ? node.size[0] : 270;
   const availW = Math.max(80, nodeW - 32);
   const GAP = 8;
   const n = items.length;
-  /* 从「每行最多 4 张」往下试，选能放下且缩略图不小于 70px 的方案 */
+  const MAX_THUMB = 150;      /* 单张最大 150px 宽，避免只有 1 张时被撑得过大 */
+  const MIN_THUMB = 70;
+  /* 从「每行最多 4 张」往下试，选能放下且缩略图不小于 MIN_THUMB 的方案 */
   let cols = Math.min(n, 4);
   while (cols > 1) {
     const w = Math.floor((availW - (cols - 1) * GAP) / cols);
-    if (w >= 70) break;
+    if (w >= MIN_THUMB) break;
     cols--;
   }
-  const W = Math.max(56, Math.floor((availW - (cols - 1) * GAP) / cols));
+  let W = Math.floor((availW - (cols - 1) * GAP) / cols);
+  W = Math.max(MIN_THUMB, Math.min(MAX_THUMB, W));   /* 同时限上下界 */
   const H = Math.round((W * 4) / 3);   /* 严格 3:4 */
   host.style.gap = GAP + "px";
   host.style.flexWrap = "wrap";
@@ -727,12 +770,13 @@ async function renderNodePreview(node) {
   const rows = Math.max(1, Math.ceil(shown / cols));
   const totalH = rows * H + (rows - 1) * GAP;
   fitNodePreview(node, totalH);
+  syncPickerWrapHeight(node);
 }
 
 /** 让节点高度包住预览区，避免图被裁掉 */
 function fitNodePreview(node, previewH) {
   if (!node || !node.size) return;
-  /* 预览高度 + 上下内边距 8 + 余量 20（用户要求预留缓冲，防止裁切） */
+  /* 预览高度 + 上下内边距 8 + 余量 20（防止裁切） */
   const extra = previewH ? previewH + 8 + 20 : 0;
   if (node._pgPreviewBase === undefined) {
     node._pgPreviewBase = node.size[1];
@@ -764,9 +808,13 @@ app.registerExtension({
       const r = onCreated ? onCreated.apply(this, arguments) : undefined;
       const node = this;
 
+      /* 先记录「无预览时的自然高度」作为基准，供 fitNodePreview 使用。
+         必须在折叠 pg_picker 之前记录，否则基准会偏小。 */
+      node._pgPreviewBase = node.size ? node.size[1] : undefined;
+
       ensureHiddenWidget(node);
 
-      /* 选中状态标签 */
+      /* 选中状态标签（仅在未选择时显示一行提示，选中后隐藏避免与预览图重复） */
       const badge = document.createElement("div");
       badge.style.cssText =
         "font-size:11px;color:#7d8592;padding:2px 0 4px;word-break:break-all";
@@ -782,8 +830,10 @@ app.registerExtension({
       /* ComfyUI 新版用 addDOMWidget 承载自定义 DOM */
       if (node.addDOMWidget) {
         const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;flex-direction:column;gap:2px";
+        wrap.style.cssText =
+          "display:flex;flex-direction:column;gap:2px;height:0;overflow:hidden";
         wrap.append(badge, preview);
+        node._pgWrap = wrap;
         const dom = node.addDOMWidget("pg_picker", "pg_picker", wrap, {
           getValue: () => selectedOf(node).join(","),
           setValue: () => {},
@@ -829,6 +879,12 @@ app.registerExtension({
       };
 
       paintSelection(node);
+      /* 首帧渲染后，把「已折叠、无预览」的稳定高度固化为基准。
+         此后无论怎么选/清空，节点高度都围绕这个基准变化。 */
+      requestAnimationFrame(() => {
+        syncPickerWrapHeight(node);
+        node._pgPreviewBase = node.size ? node.size[1] : undefined;
+      });
       return r;
     };
 
