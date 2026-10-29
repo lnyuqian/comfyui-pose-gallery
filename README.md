@@ -5,7 +5,9 @@
 Browse a **local pose-reference library** inside ComfyUI and feed the chosen
 line-art sketches straight into your generation graph.
 
-**[中文](#中文) · [English](#english)**
+**[中文](#中文) · [English](#english) · [工作流说明 / Workflows](workflows/README.md)**
+
+> **更新日期 / Updated**: 2026-10-29
 
 ---
 
@@ -74,7 +76,7 @@ remembers its size.
 
 **装上即可用**：节点上有「⤓ 下载素材（首次使用）」按钮，点一下自动把素材从原站下载到你的本机。
 
-### 四个节点
+### 五个节点
 
 | 节点 | 用途 |
 | --- | --- |
@@ -82,6 +84,7 @@ remembers its size.
 | **姿态库 · 角度组（5 角度）** | 取同一姿态的多个角度作为批次 |
 | **姿态库 · 批量** | 按系统/分类/关键词批量取，或直接传多个 `pose_id` |
 | **姿态库 · 从批次取单张** | 从批次中按序号取一张，元信息同步取出 |
+| **姿态库 · 姿态描述提示词** | 从批次的 `META_JSON` 取第 N 个姿态，输出「体位 + 名称」提示词文本，用于拼接进生图提示词；批量出图时每条分支接一个即可显著提升线稿还原度 |
 
 **输出口**：`IMAGE` / `META_JSON` / `IMAGE_IDS` / `PATHS` / `NOTE`，四者严格一一对应。
 
@@ -110,30 +113,41 @@ remembers its size.
 
 ### 接入生图（实测示例）
 
+> **更新日期：2026-10-29** ｜ 详细说明见 **[workflows/README.md](workflows/README.md)**
+
 仓库 `workflows/` 下有两个实测可用的工作流（基于 **Qwen-Image-2.1**）：
 
-| 文件 | 说明 |
-| --- | --- |
-| [`workflows/pose-to-qwen-single.json`](workflows/pose-to-qwen-single.json) | 单张：选 1 个姿态 → 生成 1 张 |
-| [`workflows/pose-to-qwen-batch.json`](workflows/pose-to-qwen-batch.json) | 批量：选多个 `pose_id` → 一次生成多张 |
+| 文件 | 说明 | 耗时（2080 Ti 22GB） |
+| --- | --- | --- |
+| [`workflows/pose-to-qwen-single.json`](workflows/pose-to-qwen-single.json) | 单张：选 1 个姿态 → 生成 1 张 | 约 12–26 秒 |
+| [`workflows/pose-to-qwen-batch.json`](workflows/pose-to-qwen-batch.json) | 批量：面板里选 N 张 → 逐张独立参考，一次生成 N 张 | 约 58–78 秒 / 3 张 |
+
+两份工作流的**节点结构、参数、避坑说明、改张数的方法**都写在
+**[workflows/README.md](workflows/README.md)** 里，这里只讲最关键的结论。
 
 链路：
 
 ```text
-PoseGalleryLoader / BatchLoader  (本插件，取姿态线稿)
+PoseGalleryBatchLoader           (本插件，一次取多张线稿)
+        ↓ 每张单独切出
+ImageFromBatch(i) → TextEncodeQwenImage21 → KSampler → VAEDecode
+        ↑
+PoseGalleryPosePrompt(i)         (把该姿态名称拼进提示词)
         ↓
-TextEncodeQwenImage21            (线稿作为参考图)
-        ↓
-KSampler → VAEDecode → SaveImage
+ImageBatch → SaveImage
 ```
 
-**批量要点**：批量工作流采用「**每个姿态独立编码 + 独立采样**」的结构 —— 每个
-`pose_id` 各占一组 `PoseGalleryLoader → TextEncodeQwenImage21 → KSampler`，
-最后用 `ImageBatch` 合并成一个批次输出。
+> **为什么批量必须逐张独立参考**
+>
+> `TextEncodeQwenImage21` 的实现是 `samples = image[:1]`——只读取传入批次的第一张。
+> 所以「一个 BatchLoader → 一个 TextEncode → `RepeatLatentBatch(N)`」这种接法里，
+> N 张产出全部只参考第 1 张线稿，后几张是拿第 1 张的条件配不同噪声自由发挥。
+> 表现为「只有第一张姿态对，后面全错」，且换几次结果都一样，不是随机性。
+> 正确做法是每条分支各自 `ImageFromBatch` 切一张、各自编码。
 
-> ⚠️ **不要**用「一个 `TextEncodeQwenImage21` + `RepeatLatentBatch`」的做法。
-> 该节点内部对每张参考图只取第一帧（`image[:1]`），且只输出**一份** latent；
-> 复制 latent 只会得到同一姿态的细微变体，后面的线稿等于没起作用。
+**批量要点**：仓库里的批量工作流共 **3 条分支**。要出别的张数，复制一条分支后同时改两处——
+该分支 `ImageFromBatch` 的 `batch_index` 与 `PoseGalleryPosePrompt` 的 `index`，
+两者都要等于这张图在 `pose_ids` 里的位置（从 0 起算）。每条分支用各自的 seed。
 
 > 这两个工作流依赖 Qwen-Image-2.1 相关模型，需自行准备。姿态素材可换成任意来源。
 
@@ -170,7 +184,7 @@ browser + reader*:
 **Works right after install**: click "⤓ Download assets (first run)" on any node
 to fetch the library onto your own machine.
 
-### The four nodes
+### The five nodes
 
 | Node | Purpose |
 | --- | --- |
@@ -178,6 +192,7 @@ to fetch the library onto your own machine.
 | **Pose Gallery · Angle Set (5 angles)** | several angles of one pose as a batch |
 | **Pose Gallery · Batch** | batch by system/category/keyword, or pass multiple `pose_id`s |
 | **Pose Gallery · Pick One** | pick one item out of a batch, metadata stays in sync |
+| **Pose Gallery · Pose Prompt** | read item N out of a batch's `META_JSON` and emit a "posture + name" prompt string; add one per branch in batch generation to markedly improve how faithfully the sketch is followed |
 
 **Outputs**: `IMAGE` / `META_JSON` / `IMAGE_IDS` / `PATHS` / `NOTE`, strictly aligned.
 
@@ -206,31 +221,43 @@ Three buttons on every gallery node:
 
 ### Wiring it into generation (verified example)
 
+> **Updated: 2026-10-29** ｜ full details in **[workflows/README.md](workflows/README.md)**
+
 Two verified workflows ship in `workflows/` (built on **Qwen-Image-2.1**):
 
-| File | Description |
-| --- | --- |
-| [`workflows/pose-to-qwen-single.json`](workflows/pose-to-qwen-single.json) | one pose → one image |
-| [`workflows/pose-to-qwen-batch.json`](workflows/pose-to-qwen-batch.json) | several `pose_id`s → several images at once |
+| File | Description | Time (2080 Ti 22GB) |
+| --- | --- | --- |
+| [`workflows/pose-to-qwen-single.json`](workflows/pose-to-qwen-single.json) | one pose → one image | ~12–26 s |
+| [`workflows/pose-to-qwen-batch.json`](workflows/pose-to-qwen-batch.json) | pick N sketches in the panel → N independent references, N images | ~58–78 s for 3 |
+
+Node structure, parameters, pitfalls and how to change the branch count live in
+**[workflows/README.md](workflows/README.md)**; only the key conclusion is repeated here.
 
 Graph:
 
 ```text
-PoseGalleryLoader / BatchLoader  (this plugin, provides the sketch)
+PoseGalleryBatchLoader           (this plugin, fetches several sketches)
+        ↓ one per branch
+ImageFromBatch(i) → TextEncodeQwenImage21 → KSampler → VAEDecode
+        ↑
+PoseGalleryPosePrompt(i)         (splices that pose's name into the prompt)
         ↓
-TextEncodeQwenImage21            (sketch as reference image)
-        ↓
-KSampler → VAEDecode → SaveImage
+ImageBatch → SaveImage
 ```
 
-**Batch note**: the batch workflow uses **one encode + one sampler per pose** — each
-`pose_id` gets its own `PoseGalleryLoader → TextEncodeQwenImage21 → KSampler`, and the
-results are merged with `ImageBatch`.
+> **Why a batch needs one reference per branch**
+>
+> `TextEncodeQwenImage21` does `samples = image[:1]` — it reads only the first image
+> of whatever batch it receives. So the common wiring
+> "one BatchLoader → one TextEncode → `RepeatLatentBatch(N)`" makes all N outputs
+> reference the first sketch only; the rest are that same conditioning driven by
+> different noise. The symptom is "only the first pose is right, the rest are wrong",
+> reproducibly — not randomness. Give each branch its own `ImageFromBatch` slice.
 
-> ⚠️ Do **not** use a single `TextEncodeQwenImage21` combined with `RepeatLatentBatch`.
-> That encoder takes only the first frame of each reference image (`image[:1]`) and
-> emits a **single** latent, so duplicating the latent only produces minor variants of
-> one pose — the later sketches have no effect.
+**Batch note**: the shipped batch workflow has **three** branches wired this way. To
+emit a different count, copy a branch and change that `ImageFromBatch`'s `batch_index`
+and its `PoseGalleryPosePrompt`'s `index`; both must match the sketch's position
+(0-based) inside `pose_ids`. Each branch also reuses its own seed.
 
 > Both workflows expect the Qwen-Image-2.1 model set, which you must provide.
 > The pose assets can be swapped for any other source.
