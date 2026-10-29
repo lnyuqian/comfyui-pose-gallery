@@ -326,7 +326,7 @@ export class DownloadPanel {
   }
 }
 
-/* 在任何姿态库节点上加一个「下载素材」按钮（放在最后一行，并显示下载状态） */
+/* 在任何姿态库节点上加一个「下载素材」按钮，并把下载状态作为 canvas 文字绘制在节点最底部 */
 app.registerExtension({
   name: "PoseGallery.Downloader",
   async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -338,21 +338,6 @@ app.registerExtension({
       const r = onCreated ? onCreated.apply(this, arguments) : undefined;
       const node = this;
 
-      /* 状态行：未下载=黄字提示，已下载=绿色「已下载」 */
-      const status = document.createElement("div");
-      status.style.cssText =
-        "font-size:11px;padding:2px 0 4px;line-height:1.4;word-break:break-all";
-      node._pgDlStatus = status;
-
-      if (node.addDOMWidget) {
-        const dom = node.addDOMWidget("pg_dl_status", "pg_dl_status", status, {
-          getValue: () => "",
-          setValue: () => {},
-          hideOnZoom: false,
-        });
-        if (dom) dom.serialize = false;
-      }
-
       const btn = node.addWidget("button", t("btnDownload"), null, () => {
         const panel = new DownloadPanel(() => {
           node.setDirtyCanvas(true, true);
@@ -361,10 +346,14 @@ app.registerExtension({
         });
         panel.init();
       });
+      node._pgDlBtn = btn;
 
-      /* 语言切换时更新按钮文字 */
+      /* 状态文本存到节点上，由 pose_gallery_node.js 的 onDrawForeground 统一绘制，
+         与线稿预览共用同一套坐标，避免 DOM widget 定位错乱。 */
+      node._pgDlText = "";
+      node._pgDlColor = "#e0a03c";
+
       node._pgRelabelDl = () => {
-        if (btn) btn.name = btn.name;      /* 文案由 refreshDownloadState 决定 */
         refreshDownloadState(node);
         node.setDirtyCanvas(true, true);
       };
@@ -384,11 +373,11 @@ app.registerExtension({
 });
 
 /**
- * 查询素材库是否就绪，据此更新按钮文字与状态行。
- * 未就绪 → 按钮写「下载素材（首次使用）」+ 黄色提示；已就绪 → 「已下载」+ 绿色状态。
+ * 查询素材库是否就绪，更新按钮文字与节点上的状态文本（canvas 绘制）。
+ * 未就绪 → 按钮「下载素材（首次使用）」+ 黄字提示；
+ * 已就绪 → 按钮「✓ 素材已下载」+ 绿字「素材已下载 · N 个姿态 / M 张图」（同一行）。
  */
 async function refreshDownloadState(node) {
-  const st = node._pgDlStatus;
   let ready = false;
   let info = null;
   try {
@@ -398,24 +387,23 @@ async function refreshDownloadState(node) {
   } catch (e) {
     ready = false;
   }
-  const btn = (node.widgets || []).find((w) => w.type === "button" && (
-    w.name === t("btnDownload") || w.name === t("btnDownloaded")));
+  const btn = node._pgDlBtn ||
+    (node.widgets || []).find((w) => w.type === "button" && (
+      w.name === t("btnDownload") || w.name === t("btnDownloaded")));
   if (ready) {
     if (btn) btn.name = t("btnDownloaded");
-    if (st) {
-      const n = info && info.total_poses != null ? info.total_poses : "";
-      const m = info && info.total_images != null ? info.total_images : "";
-      st.textContent = n ? t("dlStateReady", { poses: n, images: m }) : t("dlStateReadyShort");
-      st.style.color = "#49c47c";
-    }
+    /* 提示与数量合并为同一行 */
+    const n = info && info.total_poses != null ? info.total_poses : 0;
+    const m = info && info.total_images != null ? info.total_images : 0;
+    node._pgDlText = t("dlStateReadyLine", { poses: n, images: m });
+    node._pgDlColor = "#49c47c";
   } else {
     if (btn) btn.name = t("btnDownload");
-    if (st) {
-      st.textContent = t("dlStateNotReady");
-      st.style.color = "#e0a03c";        /* 黄字提示 */
-    }
+    node._pgDlText = t("dlStateNotReady");
+    node._pgDlColor = "#e0a03c";        /* 黄字提示 */
   }
   if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
+  if (node.graph && node.graph.setDirtyCanvas) node.graph.setDirtyCanvas(true, true);
 }
 
 /* 语言切换时刷新所有节点的下载按钮 */

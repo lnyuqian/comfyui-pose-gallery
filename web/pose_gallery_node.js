@@ -1,6 +1,13 @@
 /* Pose Gallery —— 节点挂载、选择状态与内联线稿预览
 
  * 从 pose_gallery.js 拆出。
+ *
+ * 重要设计决定（2026-10-29）：
+ *   节点上的线稿预览与下载状态行改为 **canvas 自绘**，不再使用 DOM widget。
+ *   原因：ComfyUI 的 .dom-widget 是 position:fixed，其 top/height 由内部 Vue
+ *   从 widget.computeSize() 与节点几何推导；多个 DOM widget 会互相挤压，
+ *   且节点高度变化后定位不刷新，导致预览图盖住参数行。canvas 自绘在同一套
+ *   坐标里排版，与参数行天然不会重叠。
  */
 
 import { app } from "../../scripts/app.js";
@@ -36,7 +43,7 @@ function ensureHiddenWidget(node) {
       w.element.parentElement.removeChild(w.element);
     }
     w.element = undefined;
-    w.computeSize = () => [0, -4];
+    w.computeSize = () => [0, 0];
     w.draw = () => {};
     w.type = "hidden";
     return w;
@@ -50,7 +57,7 @@ function ensureHiddenWidget(node) {
     value: "",
     options: { serialize: true },
     serialize: true,
-    computeSize: () => [0, -4],
+    computeSize: () => [0, 0],
     draw: () => {},
     mouse: () => false,
   };
@@ -69,40 +76,20 @@ function selectedOf(node) {
   }
 }
 
-function paintSelection(node) {
-  const ids = selectedOf(node);
-  if (!node._pgBadge) return;
-  /* 已选时不再重复显示数量——下方预览图本身已带 pose_id 标签；
-     只在「未选择」时给一行提示。 */
-  if (ids.length) {
-    node._pgBadge.textContent = "";
-    node._pgBadge.style.display = "none";
-  } else {
-    node._pgBadge.textContent = t("notSelected");
-    node._pgBadge.style.display = "";
-    node._pgBadge.style.color = "#7d8592";
-  }
-  renderNodePreview(node);
-  syncPickerWrapHeight(node);
-}
-
-/** pg_picker 是 DOM widget，内容为空时把它压成 0 高度，避免节点中出现大片空白 */
-function syncPickerWrapHeight(node) {
-  const wrap = node._pgWrap;
-  if (!wrap) return;
-  const badgeOn = !!(node._pgBadge && node._pgBadge.textContent &&
-                     node._pgBadge.style.display !== "none");
-  const prevOn = !!(node._pgPreview && node._pgPreview.style.display !== "none" &&
-                    node._pgPreview.children.length);
-  wrap.style.height = (badgeOn || prevOn) ? "auto" : "0px";
-  wrap.style.overflow = (badgeOn || prevOn) ? "visible" : "hidden";
-}
 /* ------------------------------------------------------------------ */
-/* 节点内联线稿预览                                                    */
+/* 预览数据（canvas 自绘用）                                           */
 /* ------------------------------------------------------------------ */
 
-/* 姿态 id → 可选角度列表由面板回填；这里只缓存已解析结果 */
+const PREV_W = 90;              /* 线稿固定宽 */
+const PREV_H = 120;             /* 线稿固定高（3:4） */
+const PREV_GAP = 8;
+const PREV_PAD = 6;             /* 预览区上下内边距 */
+const CAP_H = 14;               /* 图片下方 id 标签高度 */
+
+/* 姿态 id → 已解析的角度列表 */
 const POSE_IMAGES_CACHE = new Map();
+/* image_id → 已加载的 HTMLImageElement */
+const IMG_CACHE = new Map();
 
 async function fetchPoseImages(poseId) {
   if (POSE_IMAGES_CACHE.has(poseId)) return POSE_IMAGES_CACHE.get(poseId);
@@ -116,107 +103,211 @@ async function fetchPoseImages(poseId) {
   }
 }
 
-/**
- * 在节点 DOM 上直接渲染已选姿态的线稿缩略图（3:4）。
- * 单选显示 1 张，批量节点显示最多 4 张并标注 +N。
- */
-async function renderNodePreview(node) {
-  const host = node._pgPreview;
-  if (!host) return;
-  const ids = selectedOf(node);
-  host.innerHTML = "";
-  if (!ids.length) {
-    host.style.display = "none";
-    fitNodePreview(node, 0);
-    syncPickerWrapHeight(node);
-    return;
-  }
-  host.style.display = "flex";
+function loadImage(url) {
+  if (!url) return Promise.resolve(null);
+  if (IMG_CACHE.has(url)) return Promise.resolve(IMG_CACHE.get(url));
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => { IMG_CACHE.set(url, im); resolve(im); };
+    im.onerror = () => resolve(null);
+    im.src = url;
+  });
+}
 
-  /* 逐个姿态取首张（正面角度）作为线稿预览 */
+/**
+ * 重新解析选中项 → 加载线稿 → 触发布局重算 + 重绘。
+ * node._pgItems = [{pid, img}]，供 drawNodePreview 使用。
+ */
+async function refreshPreviewData(node) {
+  const ids = selectedOf(node);
   const items = [];
   for (const pid of ids.slice(0, 4)) {
     const imgs = await fetchPoseImages(pid);
     const cover = imgs.find((x) => x.angle === "正面") || imgs[0];
-    items.push({ pid, url: cover ? cover.thumb_url : "" });
+    const img = cover ? await loadImage(cover.thumb_url) : null;
+    items.push({ pid, img });
   }
-
-  /* 预览尺寸：按节点宽度决定每行几列，保持 3:4 */
-  const nodeW = node.size ? node.size[0] : 270;
-  const availW = Math.max(80, nodeW - 32);
-  const GAP = 8;
-  const n = items.length;
-  const MAX_THUMB = 150;      /* 单张最大 150px 宽，避免只有 1 张时被撑得过大 */
-  const MIN_THUMB = 70;
-  /* 从「每行最多 4 张」往下试，选能放下且缩略图不小于 MIN_THUMB 的方案 */
-  let cols = Math.min(n, 4);
-  while (cols > 1) {
-    const w = Math.floor((availW - (cols - 1) * GAP) / cols);
-    if (w >= MIN_THUMB) break;
-    cols--;
-  }
-  let W = Math.floor((availW - (cols - 1) * GAP) / cols);
-  W = Math.max(MIN_THUMB, Math.min(MAX_THUMB, W));   /* 同时限上下界 */
-  const H = Math.round((W * 4) / 3);   /* 严格 3:4 */
-  host.style.gap = GAP + "px";
-  host.style.flexWrap = "wrap";
-  host.style.maxWidth = availW + "px";
-
-  for (const it of items) {
-    const cell = document.createElement("div");
-    cell.style.cssText =
-      "position:relative;width:" + W + "px;height:" + H + "px;border-radius:8px;overflow:hidden;" +
-      "background:#f2f2f0;border:1px solid #2a303a;flex:0 0 auto";
-    if (it.url) {
-      const im = document.createElement("img");
-      im.src = it.url;
-      im.alt = it.pid;
-      im.style.cssText =
-        "width:100%;height:100%;aspect-ratio:3 / 4;object-fit:cover;object-position:center top;display:block";
-      cell.append(im);
-    }
-    const tag = document.createElement("div");
-    tag.textContent = it.pid;
-    tag.style.cssText =
-      "position:absolute;left:0;right:0;bottom:0;padding:2px 5px;font-size:9.5px;" +
-      "color:#dfe4ec;background:rgba(10,12,16,.72);overflow:hidden;" +
-      "text-overflow:ellipsis;white-space:nowrap";
-    cell.append(tag);
-    host.append(cell);
-  }
-
-  if (ids.length > 4) {
-    const more = document.createElement("div");
-    more.textContent = "+" + (ids.length - 4);
-    more.style.cssText =
-      "align-self:center;font-size:12px;color:#8fb4ff;padding:0 6px";
-    host.append(more);
-  }
-
-  /* 关键：按「实际行数」算高度，避免第二行溢出节点 */
-  const shown = Math.min(items.length, 4) + (ids.length > 4 ? 1 : 0);
-  const rows = Math.max(1, Math.ceil(shown / cols));
-  const totalH = rows * H + (rows - 1) * GAP;
-  fitNodePreview(node, totalH);
-  syncPickerWrapHeight(node);
+  node._pgItems = items;
+  node._pgOverflow = Math.max(0, ids.length - 4);
+  relayoutNode(node);
 }
 
-/** 让节点高度包住预览区，避免图被裁掉 */
-function fitNodePreview(node, previewH) {
+/* ------------------------------------------------------------------ */
+/* 布局：节点高度按「基准 + 预览区高度」计算                            */
+/* ------------------------------------------------------------------ */
+
+/** 预览区 + 状态行总高度 */
+function previewBlockHeight(node) {
+  const gridH = previewGridHeight(node);
+  const hasItems = (node._pgItems || []).length > 0;
+  const statusH = node._pgDlText ? 18 : 0;
+  if (!hasItems) {
+    /* 未选时只有「未选择」提示 + 状态行 */
+    return (node._pgDlText ? 22 : 22) + statusH;
+  }
+  return gridH + PREV_PAD * 2 + statusH;
+}
+
+/** 让节点高度包住预览区；无预览时回到基准高度 */
+function fitNodePreview(node) {
   if (!node || !node.size) return;
-  /* 预览高度 + 上下内边距 8 + 余量 20（防止裁切） */
-  const extra = previewH ? previewH + 8 + 20 : 0;
   if (node._pgPreviewBase === undefined) {
     node._pgPreviewBase = node.size[1];
   }
-  const want = node._pgPreviewBase + extra;
-  if (Math.abs((node.size[1] || 0) - want) > 2) {
+  const want = node._pgPreviewBase + previewBlockHeight(node);
+  if (Math.abs((node.size[1] || 0) - want) > 1) {
     node.size[1] = want;
-    node.setDirtyCanvas(true, true);
+  }
+  if (app && app.canvas) app.canvas.setDirty(true, true);
+}
+
+/** 高度变化后触发重排与重绘 */
+function relayoutNode(node) {
+  if (!node) return;
+  fitNodePreview(node);
+  if (typeof node.setSize === "function" && node.size) {
+    try { node.setSize([node.size[0], node.size[1]]); } catch (e) { /* ignore */ }
+  }
+  if (node.setDirtyCanvas) node.setDirtyCanvas(true, true);
+  if (app && app.canvas) app.canvas.setDirty(true, true);
+}
+
+/**
+ * canvas 自绘：线稿预览 + 下载状态行。
+ * 绘制区域锚定在节点「底部预留空间」内（fitNodePreview 把这部分高度加在最下方），
+ * 所以不会盖住上面的参数行。
+ */
+function drawNodePreview(node, ctx) {
+  if (!ctx) return;
+  const items = node._pgItems || [];
+  const nodeW = node.size ? node.size[0] : 300;
+  const blockH = previewBlockHeight(node);
+  /* 预留区起点：节点底部往上 blockH */
+  const baseY = Math.max(0, (node.size ? node.size[1] : 0) - blockH);
+
+  /* 未选择：一行灰字提示 */
+  if (!items.length) {
+    ctx.save();
+    ctx.fillStyle = "#7d8592";
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(t("notSelected"), 10, baseY + 2);
+    ctx.restore();
+    drawDownloadStatus(node, ctx, baseY + 20);
+    return;
+  }
+
+  ctx.save();
+  const startY = baseY + PREV_PAD;
+  const availW = Math.max(80, nodeW - 24);
+  const cols = Math.max(1, Math.floor((availW + PREV_GAP) / (PREV_W + PREV_GAP)));
+
+  items.forEach((it, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const x = 10 + c * (PREV_W + PREV_GAP);
+    const y = startY + r * (PREV_H + CAP_H + PREV_GAP);
+
+    /* 底板 */
+    ctx.fillStyle = "#f2f2f0";
+    ctx.fillRect(x, y, PREV_W, PREV_H);
+    /* 线稿 */
+    if (it.img && it.img.width) {
+      ctx.drawImage(it.img, x, y, PREV_W, PREV_H);
+    }
+    /* 边框 */
+    ctx.strokeStyle = "#2a303a";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, PREV_W - 1, PREV_H - 1);
+  });
+
+  /* 超出 4 张的 +N 提示 */
+  if ((node._pgOverflow || 0) > 0) {
+    const idx = items.length;
+    const c = idx % cols;
+    const r = Math.floor(idx / cols);
+    const x = 10 + c * (PREV_W + PREV_GAP);
+    const y = startY + r * (PREV_H + CAP_H + PREV_GAP);
+    ctx.fillStyle = "#8fb4ff";
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("+" + node._pgOverflow, x, y + 4);
+  }
+  ctx.restore();
+
+  /* 状态行紧接在预览区下方 */
+  drawDownloadStatus(node, ctx, startY + previewGridHeight(node) + 4);
+}
+
+/** 下载状态行：画在预览区下方（同一行显示提示与数量） */
+function drawDownloadStatus(node, ctx, top) {
+  const text = node._pgDlText;
+  if (!text) return;
+  const nodeW = node.size ? node.size[0] : 300;
+  ctx.save();
+  ctx.fillStyle = node._pgDlColor || "#e0a03c";
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  let shown = text;
+  while (ctx.measureText(shown).width > nodeW - 20 && shown.length > 6) {
+    shown = shown.slice(0, -1);
+  }
+  ctx.fillText(shown, 10, top);
+  ctx.restore();
+}
+
+/** 预览网格高度（不含上下内边距） */
+function previewGridHeight(node) {
+  const items = node._pgItems || [];
+  if (!items.length) return 0;
+  const nodeW = node.size ? node.size[0] : 300;
+  const availW = Math.max(80, nodeW - 24);
+  const cols = Math.max(1, Math.floor((availW + PREV_GAP) / (PREV_W + PREV_GAP)));
+  const shown = Math.min(items.length, 4) + ((node._pgOverflow || 0) > 0 ? 1 : 0);
+  const rows = Math.max(1, Math.ceil(shown / cols));
+  return rows * (PREV_H + CAP_H) + (rows - 1) * PREV_GAP;
+}
+
+/* ------------------------------------------------------------------ */
+/* 多行输入框高度限制                                                  */
+/* ------------------------------------------------------------------ */
+
+const MULTILINE_ROWS = 2;
+const MULTILINE_LINE_H = 18;
+
+/** 把多行 STRING 控件（pose_ids / angles）压到两行高度 */
+function shrinkMultilineWidgets(node) {
+  if (!node || !node.widgets) return;
+  const targets = ["pose_ids", "angles"];
+  const capH = MULTILINE_ROWS * MULTILINE_LINE_H + 12;
+  for (const w of node.widgets) {
+    if (!targets.includes(w.name)) continue;
+    w.computeSize = function (width) {
+      return [width || (node.size ? node.size[0] : 300), capH];
+    };
+    const el = w.inputEl || w.element;
+    if (el && el.style) {
+      el.style.height = capH + "px";
+      el.style.minHeight = capH + "px";
+      el.style.maxHeight = capH + "px";
+      el.style.overflowY = "auto";
+      el.style.lineHeight = MULTILINE_LINE_H + "px";
+    }
   }
 }
 
-/** 语言切换后刷新所有已创建节点的按钮文字与状态标签 */
+/* ------------------------------------------------------------------ */
+/* 节点注册                                                            */
+/* ------------------------------------------------------------------ */
+
+function paintSelection(node) {
+  refreshPreviewData(node);
+}
+
+/** 语言切换后刷新所有已创建节点 */
 function relabelNodes() {
   const nodes = (app.graph && app.graph._nodes) || [];
   for (const node of nodes) {
@@ -224,6 +315,7 @@ function relabelNodes() {
     if (node._pgRelabel) node._pgRelabel();
   }
 }
+
 app.registerExtension({
   name: "PoseGallery.Picker",
 
@@ -235,58 +327,26 @@ app.registerExtension({
       const r = onCreated ? onCreated.apply(this, arguments) : undefined;
       const node = this;
 
-      /* 先记录「无预览时的自然高度」作为基准，供 fitNodePreview 使用。
-         必须在折叠 pg_picker 之前记录，否则基准会偏小。 */
-      node._pgPreviewBase = node.size ? node.size[1] : undefined;
-
       ensureHiddenWidget(node);
+      node._pgItems = [];
+      node._pgOverflow = 0;
 
-      /* 选中状态标签（仅在未选择时显示一行提示，选中后隐藏避免与预览图重复） */
-      const badge = document.createElement("div");
-      badge.style.cssText =
-        "font-size:11px;color:#7d8592;padding:2px 0 4px;word-break:break-all";
-      node._pgBadge = badge;
-
-      /* 线稿预览容器（直接嵌在节点上，选中后即时显示） */
-      const preview = document.createElement("div");
-      preview.style.cssText =
-        "display:none;flex-wrap:wrap;align-items:flex-start;padding:2px 0 6px;" +
-        "max-width:640px";
-      node._pgPreview = preview;
-
-      /* ComfyUI 新版用 addDOMWidget 承载自定义 DOM */
-      if (node.addDOMWidget) {
-        const wrap = document.createElement("div");
-        wrap.style.cssText =
-          "display:flex;flex-direction:column;gap:2px;height:0;overflow:hidden";
-        wrap.append(badge, preview);
-        node._pgWrap = wrap;
-        const dom = node.addDOMWidget("pg_picker", "pg_picker", wrap, {
-          getValue: () => selectedOf(node).join(","),
-          setValue: () => {},
-          hideOnZoom: false,
-        });
-        if (dom) dom.serialize = false;
-      }
-
-      /* 打开图库选择 → 选完直接把线稿展示在节点上 */
+      /* 打开图库选择 → 选完直接把线稿画到节点上 */
       const btnOpen = node.addWidget("button", t("btnOpenPicker"), null, () => {
         const panel = new PickerPanel(node, (ids) => {
           const w = ensureHiddenWidget(node);
           w.value = JSON.stringify(ids);
-          paintSelection(node);          // 内部已调用 renderNodePreview，选完即出图
+          paintSelection(node);
           node.setDirtyCanvas(true, true);
         });
         panel.init().then(() => {
-          /* 回填已选项 */
           for (const id of selectedOf(node)) panel.selected.add(id);
           panel._render();
         });
       });
 
       const btnShow = node.addWidget("button", t("btnShowSketch"), null, () => {
-        renderNodePreview(node);
-        node.setDirtyCanvas(true, true);
+        refreshPreviewData(node);
       });
 
       const btnClear = node.addWidget("button", t("btnClear"), null, () => {
@@ -296,26 +356,34 @@ app.registerExtension({
         node.setDirtyCanvas(true, true);
       });
 
-      /* 供语言切换时调用 */
       node._pgRelabel = () => {
         if (btnOpen) btnOpen.name = t("btnOpenPicker");
         if (btnShow) btnShow.name = t("btnShowSketch");
         if (btnClear) btnClear.name = t("btnClear");
-        paintSelection(node);
+        paintSelection(node);        /* 重新解析选中项并重排，确保外部改 selected_id 后也能刷新 */
         node.setDirtyCanvas(true, true);
       };
 
+      /* canvas 自绘预览 */
+      const onDraw = node.onDrawForeground;
+      node.onDrawForeground = function (ctx) {
+        const rr = onDraw ? onDraw.apply(this, arguments) : undefined;
+        drawNodePreview(node, ctx);
+        return rr;
+      };
+
+      shrinkMultilineWidgets(node);
       paintSelection(node);
-      /* 首帧渲染后，把「已折叠、无预览」的稳定高度固化为基准。
-         此后无论怎么选/清空，节点高度都围绕这个基准变化。 */
+
+      /* 首帧后把「无预览」的稳定高度固化为基准 */
       requestAnimationFrame(() => {
-        syncPickerWrapHeight(node);
+        shrinkMultilineWidgets(node);
         node._pgPreviewBase = node.size ? node.size[1] : undefined;
+        relayoutNode(node);
       });
       return r;
     };
 
-    /* 从工作流读回来时刷新显示 */
     const onConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;

@@ -373,6 +373,7 @@ class PoseGalleryBatchLoader:
                                      "tooltip": "关键词：在名称 / 编号 / 系统 / 分类里匹配"}),
                 "pose_ids": ("STRING", {
                     "default": "", "multiline": True,
+                    "rows": 2,
                     "tooltip": "直接指定姿态 id（逗号或换行分隔），填了就忽略上面的筛选",
                 }),
             },
